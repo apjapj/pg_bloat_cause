@@ -1,0 +1,37 @@
+# .github/workflows/ci.yml: the checks a tag needs to have passed.
+#
+# Two jobs. lint needs no database. test runs ci/job.sh once per PostgreSQL version that has committed
+# evidence (14 and 18): it builds the server image from the official one plus pgTAP, builds a primary
+# and a hot standby for s3, runs pgTAP and every scenario, and requires the masked evidence to come out
+# byte-identical to what is committed. Everything a job does is in ci/job.sh, so a failure here can be
+# reproduced locally with the same command.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: every linked figure is in its evidence file
+        run: ./scenarios/check-evidence.sh
+      - name: every script parses
+        run: for s in scenarios/*.sh ci/*.sh; do bash -n "$s" || exit 1; done
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pg: ["14", "18"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: psql and pg_prove on the runner
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q postgresql-client libtap-parser-sourcehandler-pgtap-perl
+      - name: build the pair, install, pgTAP, scenarios, evidence
+        run: ./ci/job.sh ${{ matrix.pg }}
