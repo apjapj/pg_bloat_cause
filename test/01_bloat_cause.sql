@@ -50,8 +50,14 @@ SELECT ok((SELECT dead_rows FROM bloat_cause_findings() WHERE relname = 'bc_test
           'dead_rows is the statistics'' count, above zero');
 SELECT ok((SELECT dead_bytes FROM bloat_cause_findings() WHERE relname = 'bc_test_orders') > 0,
           'dead_bytes is estimated from the heap size, above zero');
-SELECT is((SELECT cardinality(unknowns) FROM bloat_cause_findings() WHERE relname = 'bc_test_orders'), 0,
-          'no horizon holder is present, so nothing is "not established"');
+-- With every horizon holder filtered out, nothing may be "not established". The filters are set past
+-- anything a real cluster has, because this assertion is about the logic, not about the cluster: an
+-- earlier version used the defaults and failed whenever some other session on the server had been in a
+-- transaction for over a minute, which the view correctly reported. Found by a hand run with a stray
+-- session from a botched setup still open.
+SELECT is((SELECT cardinality(unknowns) FROM bloat_cause_findings(interval '1000 years', 9223372036854775807)
+            WHERE relname = 'bc_test_orders'), 0,
+          'with no horizon holder in play, nothing is "not established"');
 SELECT ok((SELECT t LIKE 'bc_test_orders: % dead rows (%, estimated), autovacuum is disabled on this table%'
              FROM bloat_cause_text() t WHERE t LIKE 'bc_test_orders:%'),
           'the sentence form names the table, the estimate label and the cause');
@@ -83,8 +89,19 @@ VACUUM bc_test_orders;
 \o
 SELECT pg_sleep(1.5);
 SELECT pg_stat_clear_snapshot();
-SELECT is((SELECT count(*)::int FROM bloat_cause_findings() WHERE relname = 'bc_test_orders'), 0,
-          'after VACUUM the table has no dead rows and does not appear');
+-- Conditional, and counted either way: if another session or a prepared transaction holds the horizon,
+-- the VACUUM above cannot remove the dead rows, the table correctly still appears, and asserting
+-- otherwise would be asserting about the cluster rather than the extension. So it is skipped, with the
+-- reason, rather than failed. The same stray session that broke the assertion above broke this one.
+SELECT CASE
+  WHEN EXISTS (SELECT 1 FROM pg_stat_activity
+                WHERE pid <> pg_backend_pid() AND backend_type = 'client backend'
+                  AND (backend_xid IS NOT NULL OR backend_xmin IS NOT NULL))
+       OR EXISTS (SELECT 1 FROM pg_prepared_xacts)
+  THEN skip('another session or a prepared transaction holds the horizon, so VACUUM cannot clean the table here', 1)
+  ELSE is((SELECT count(*)::int FROM bloat_cause_findings() WHERE relname = 'bc_test_orders'), 0,
+          'after VACUUM the table has no dead rows and does not appear')
+END;
 
 -- The age rendering the sentences use.
 SELECT is(bloat_cause_age(interval '3 days 4 hours'), '3 days', 'ages of two days or more are in days');
