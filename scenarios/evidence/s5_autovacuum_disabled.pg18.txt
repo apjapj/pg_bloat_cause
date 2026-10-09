@@ -1,0 +1,23 @@
+ waiting 40 s, four autovacuum naptimes, for the control table to be vacuumed
+
+the usual hand-written query (pg_stat_user_tables)
+ relname | n_live_tup | n_dead_tup | dead_pct | last_autovacuum | last_vacuum
+ s5_control | 100000 | 0 | 0.0 | <TIMESTAMP> |
+ s5_orders | 100000 | 50000 | 33.3 | |
+(2 rows)
+
+
+measured (pgstattuple)
+ s5_orders: 100000 live rows, 50000 dead rows, 31.38% of the table is dead tuples
+ s5_control: 100000 live rows, 0 dead rows, 0% of the table is dead tuples
+
+evidence: the reloption and the trigger threshold
+ relname | reloptions | n_dead_tup | would_trigger_at
+ s5_control | | 0 | 20050
+ s5_orders | {autovacuum_enabled=false} | 50000 | 20050
+(2 rows)
+
+
+expected cause
+ autovacuum is switched off for s5_orders (autovacuum_enabled=false); s5_control, changed
+ identically, was vacuumed. The fix is ALTER TABLE ... RESET (autovacuum_enabled), then VACUUM.

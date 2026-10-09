@@ -1,0 +1,23 @@
+
+the usual hand-written query (pg_stat_user_tables)
+ relname | n_live_tup | n_dead_tup | dead_pct | last_autovacuum | last_vacuum
+ s1_orders | 100000 | 100000 | 50.0 | |
+(1 row)
+
+
+measured (pgstattuple)
+ s1_orders: 100000 live rows, 100000 dead rows, 47.07% of the table is dead tuples
+
+VACUUM (VERBOSE) s1_orders
+ INFO: table "s1_orders": found 0 removable, 200000 nonremovable row versions in 3449 out of 3449 pages
+ DETAIL: 100000 dead row versions cannot be removed yet, oldest xmin: <XID>
+
+evidence: who holds the horizon
+ pid | application_name | state | backend_xid | backend_xmin | xid_age | open_for
+<PID> | bloat_scen_s1 | idle in transaction | <XID> | | <XIDAGE> | <AGE>
+(1 row)
+
+
+expected cause
+ held back by session bloat_scen_s1, idle in transaction since the updates. VACUUM removes
+ nothing until it ends; terminating it is the fix, VACUUM is not.

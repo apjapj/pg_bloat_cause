@@ -10,7 +10,7 @@ restart, no `shared_preload_libraries`. Status on 2026-10-08: design only, nothi
 
 Bloat tools report how big a table is and how much of it is dead. That is the symptom, and it leaves
 the operator to work out why VACUUM is not keeping up. pg_bloat_cause answers the why, per table,
-ranked worst first, in one sentence:
+ranked worst first, in one sentence (an illustration of the format, not a measurement):
 
 ```
 orders: 40% dead rows, held back by session 4127 (idle in transaction) for 3 days
@@ -18,8 +18,10 @@ orders: 40% dead rows, held back by session 4127 (idle in transaction) for 3 day
 
 An earlier version of this example blamed a logical replication slot. That was wrong, and
 `scenarios/s2_logical_slot.sh` shows it: a logical slot holds back catalog rows (`catalog_xmin`), not
-an ordinary table's. With an inactive slot in place, VACUUM removed all 100,000 dead rows of the user
-table and could not remove 6,000 in `pg_attribute`.
+an ordinary table's. With an inactive slot in place, VACUUM removed all
+[100,000](scenarios/evidence/s2_logical_slot.pg18.txt) dead rows of the user table and could not remove
+[6,000](scenarios/evidence/s2_logical_slot.pg18.txt) in `pg_attribute`. The same run on 14:
+[100000](scenarios/evidence/s2_logical_slot.pg14.txt) and [6000](scenarios/evidence/s2_logical_slot.pg14.txt).
 
 ### The causes it ranks
 

@@ -96,7 +96,7 @@ SELECT '  $t: ' || tuple_count || ' live rows, ' || dead_tuple_count || ' dead r
 vacuum_says() {
     say "VACUUM (VERBOSE) $1"
     psql -X -c "SET client_min_messages = info" -c "VACUUM (VERBOSE) $SCHEMA.$1" 2>&1 \
-        | grep -E 'tuples: |removable cutoff|oldest xmin' | head -2 | sed 's/^/  /'
+        | grep -E 'tuples: |removable cutoff|oldest xmin|found [0-9]+ removable' | head -2 | sed 's/^/  /'
 }
 
 expected() { say "expected cause"; note "$1"; }

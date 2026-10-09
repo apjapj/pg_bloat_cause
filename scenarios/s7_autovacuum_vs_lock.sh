@@ -41,7 +41,9 @@ fi
 say "part 2: forcing an anti-wraparound autovacuum"
 psql_q -c "CREATE OR REPLACE PROCEDURE $SCHEMA.burn_xids(n int) LANGUAGE plpgsql AS \$\$
 BEGIN FOR i IN 1..n LOOP PERFORM txid_current(); COMMIT; END LOOP; END \$\$" -c "CALL $SCHEMA.burn_xids(110000)"
-note "age(relfrozenxid) is now $(val "SELECT age(relfrozenxid) FROM pg_class WHERE oid = '$SCHEMA.s7_orders'::regclass") xids"
+# The fact that matters, not the raw age: the raw value moved by one xid between two runs (110,005 and
+# 110,006), which made the evidence differ for no reason anyone cares about.
+note "age(relfrozenxid) is at least 110,000 xids, over the table's autovacuum_freeze_max_age of 100,000: $(val "SELECT age(relfrozenxid) >= 110000 FROM pg_class WHERE oid = '$SCHEMA.s7_orders'::regclass")"
 sleep $((naptime * 3))
 say "evidence, part 2: autovacuum workers now"
 psql -X -P pager=off -c "

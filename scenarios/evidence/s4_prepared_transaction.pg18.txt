@@ -1,0 +1,23 @@
+
+the usual hand-written query (pg_stat_user_tables)
+ relname | n_live_tup | n_dead_tup | dead_pct | last_autovacuum | last_vacuum
+ s4_orders | 100000 | 100000 | 50.0 | |
+(1 row)
+
+
+measured (pgstattuple)
+ s4_orders: 100000 live rows, 100000 dead rows, 47.07% of the table is dead tuples
+
+VACUUM (VERBOSE) s4_orders
+ tuples: 0 removed, 200000 remain, 100000 are dead but not yet removable
+ removable cutoff: <XID>, which was <XIDAGE> XIDs old when operation ended
+
+evidence: the prepared transaction
+ gid | transaction | xid_age | prepared | open_for | owner
+ bloat_scen_gxid | <XID> | <XIDAGE> | <TIMESTAMP> | <AGE> | postgres
+(1 row)
+
+
+expected cause
+ held back by prepared transaction bloat_scen_gxid. No session to cancel: the fix is
+ ROLLBACK PREPARED 'bloat_scen_gxid' (or COMMIT PREPARED if it should have committed).
