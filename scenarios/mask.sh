@@ -32,13 +32,18 @@ MASKS=(
   's/^ (bloat_scen_slot) +\| logical +\| f +\| +\| +[0-9]+ \| +[0-9]+$/ \1 | logical | f | | <XID> | <XIDAGE>/'
   # s9's evidence row for the holder: cause | what | how_much (an xid age)
   's/^ (horizon holder) \| (bloat_scen_s9) +\| [0-9]+ *$/ \1 | \2 | <XIDAGE>/'
+  # s3: a physical slot's xmin age
+  's/(xmin set, xmin age )[0-9]+/\1<XIDAGE>/'
   # an autovacuum worker's pid
   's/^ *[0-9]+ \| (Lock|autovacuum worker)/<PID> | \1/'
   # pg_attribute is the CATALOG, not the fixture: how many rows it has removed and kept depends on
-  # everything the cluster has done before. The dead-but-not-removable count is the evidence and stays.
+  # everything the cluster has done before, and so does its dead-but-not-removable count, which moved
+  # between runs once a standby was attached (6,000 and 6,021). s2 reports the rows its own churn added
+  # on a separate line, and that line is the evidence.
   # s2 prefixes those lines with "pg_attribute" so this rule cannot touch the user table's line, whose
   # "100000 removed" is the point of the scenario. <N> is the one token here that is not a value type.
-  's/^(  pg_attribute tuples: )[0-9]+ removed, [0-9]+ remain, /\1<N> removed, <N> remain, /'
+  's/^(  pg_attribute tuples: )[0-9]+ removed, [0-9]+ remain, [0-9]+ are dead/\1<N> removed, <N> remain, <N> are dead/'
+  's/^(  pg_attribute DETAIL: +)[0-9]+ dead row versions/\1<N> dead row versions/'
   # The same on 14, whose VACUUM VERBOSE reports the catalog's counts on an INFO line instead.
   's/^(  pg_attribute INFO: +table "pg_attribute": found )[0-9]+ removable, [0-9]+ nonremovable row versions in [0-9]+ out of [0-9]+ pages/\1<N> removable, <N> nonremovable row versions in <N> out of <N> pages/'
 )

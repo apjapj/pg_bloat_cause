@@ -14,7 +14,8 @@ VACUUM (VERBOSE) s2_orders
 
 VACUUM (VERBOSE) pg_catalog.pg_attribute
  pg_attribute INFO: table "pg_attribute": found <N> removable, <N> nonremovable row versions in <N> out of <N> pages
- pg_attribute DETAIL: 6000 dead row versions cannot be removed yet, oldest xmin: <XID>
+ pg_attribute DETAIL: <N> dead row versions cannot be removed yet, oldest xmin: <XID>
+ dead rows in pg_attribute that VACUUM left, added by the 300 temporary-table cycles: 6000
 
 evidence: the slot
  slot_name | slot_type | active | xmin | catalog_xmin | catalog_xmin_age

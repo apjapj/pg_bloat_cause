@@ -4,7 +4,9 @@
 . "$(dirname "$0")/lib.sh"
 [ "$(val "SHOW max_prepared_transactions")" -gt 0 ] || skip "max_prepared_transactions is 0"
 setup_schema
-make_table s4_orders 100000
+# autovacuum off on the table: an autovacuum running during the hold is timing, and it made
+# last_autovacuum differ between two otherwise identical runs. The evidence is the manual VACUUM.
+make_table s4_orders 100000 "WITH (autovacuum_enabled = false)"
 psql_q -c "BEGIN" -c "SELECT txid_current()" -c "PREPARE TRANSACTION 'bloat_scen_gxid'" >/dev/null
 psql_q -c "UPDATE $SCHEMA.s4_orders SET status = 'paid'"
 settle_stats

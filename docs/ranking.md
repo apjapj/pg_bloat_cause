@@ -22,7 +22,7 @@ remove what it finds. So:
 
 | Cause | What it blocks | So it is upstream of |
 |---|---|---|
-| **Horizon holder** (session, prepared transaction, a standby's feedback through a physical slot or walsender) | Every VACUUM's ability to *remove* rows newer than the horizon, manual or automatic | everything below |
+| **Horizon holder** (session, prepared transaction, a standby's query held through `hot_standby_feedback`, which with a physical slot shows on the slot's `xmin`, not the walsender's, as s3 measured) | Every VACUUM's ability to *remove* rows newer than the horizon, manual or automatic | everything below |
 | **Lock keeping vacuum off the table** | Every VACUUM's ability to *start* on this table: autovacuum skips it, a manual VACUUM waits | autovacuum off or behind, HOT efficiency |
 | **Autovacuum off or behind** (disabled, thresholds never reached, workers saturated) | Only the *automatic* VACUUM; a manual one would work | HOT efficiency |
 | **Updates that cannot be HOT** | Nothing. It is why dead rows are produced quickly, not why they stay | nothing |
@@ -117,6 +117,24 @@ finding, and it outranks every other lock finding:
 s7_orders: an anti-wraparound autovacuum is waiting on session bloat_scen_s7's lock. Until it ends this
 table cannot be frozen, and the database is moving towards wraparound.
 ```
+
+## A horizon held from a standby
+
+s3 is a horizon holder like s9's session, with one difference that changes the sentence: the query is
+not on this server, so neither `pg_stat_activity` nor the fix is here. The primary removed
+[0](../scenarios/evidence/s3_standby_feedback.pg18.txt) of
+[100,000](../scenarios/evidence/s3_standby_feedback.pg18.txt) dead rows, saw the standby only as its
+physical slot's `xmin` (the walsender's `backend_xmin` was NULL), and removed all
+[100000](../scenarios/evidence/s3_standby_feedback.pg18.txt) once the standby's query ended:
+
+```
+s3_orders: 100,000 dead rows (47.07%, measured), held back by standby bc_standby_18 through its slot
+standby_s3 (hot_standby_feedback). A query open ON THE STANDBY is the cause; end it there, or turn
+hot_standby_feedback off and accept query cancellations on the standby.
+```
+
+It ranks as a horizon holder, above everything else on the table, and `bloat_cause_command()` returns
+nothing runnable here: the statement that fixes it has to be run on another server.
 
 ## Within one cause: dead bytes, not share
 

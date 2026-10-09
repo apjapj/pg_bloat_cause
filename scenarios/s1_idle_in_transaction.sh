@@ -3,7 +3,9 @@
 # ANY table, however often it runs. Expected cause: the horizon holder, by name and age.
 . "$(dirname "$0")/lib.sh"
 setup_schema
-make_table s1_orders 100000
+# autovacuum off on the table: an autovacuum running during the hold is timing, and it made
+# last_autovacuum differ between two otherwise identical runs. The evidence is the manual VACUUM.
+make_table s1_orders 100000 "WITH (autovacuum_enabled = false)"
 # The holder takes an xid BEFORE the updates, which is what pins the horizon below them.
 start_holder s1 "SELECT txid_current();"
 psql_q -c "UPDATE $SCHEMA.s1_orders SET status = 'paid'"

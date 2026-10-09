@@ -1,2 +1,33 @@
 
- SKIP needs a primary/standby pair; the matrix images are single servers
+the usual hand-written query (pg_stat_user_tables)
+ relname | n_live_tup | n_dead_tup | dead_pct | last_autovacuum | last_vacuum
+ s3_orders | 100000 | 100000 | 50.0 | |
+(1 row)
+
+
+measured (pgstattuple)
+ s3_orders: 100000 live rows, 100000 dead rows, 47.07% of the table is dead tuples
+
+VACUUM (VERBOSE) s3_orders
+ INFO: table "s3_orders": found 0 removable, 200000 nonremovable row versions in 3449 out of 3449 pages
+ DETAIL: 100000 dead row versions cannot be removed yet, oldest xmin: <XID>
+
+evidence on the primary: where the standby's horizon shows
+ walsender bc_standby_14: streaming, backend_xmin NULL
+ slot standby_s3: physical, active true, xmin set, xmin age <XIDAGE>
+
+evidence on the standby: the query holding it
+ standby session bloat_scen_s3: idle in transaction, backend_xmin set
+
+part 2: end the query on the standby, wait for feedback, VACUUM again
+ slot xmin has moved past the updates: t
+
+VACUUM (VERBOSE) s3_orders
+ INFO: table "s3_orders": found 100000 removable, 100000 nonremovable row versions in 3449 out of 3449 pages
+ DETAIL: 0 dead row versions cannot be removed yet, oldest xmin: <XID>
+
+expected cause
+ held back by standby bc_standby_14 through its physical slot,
+ because of a query open ON THE STANDBY. The fix is on the standby: end that query, or turn
+ hot_standby_feedback off and accept query cancellations there instead. Part 2 shows it: with the
+ query ended and nothing else changed, the same VACUUM removes every dead row.

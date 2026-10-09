@@ -12,6 +12,11 @@ psql_q -c "SELECT pg_create_logical_replication_slot('bloat_scen_slot', 'test_de
 # one of two runs: the conclusion was the same (nothing held them back) but the capture was not.
 make_table s2_orders 100000 "WITH (autovacuum_enabled = false)"
 psql_q -c "UPDATE $SCHEMA.s2_orders SET status = 'paid'"
+# The catalog's own dead rows, before the churn. pg_attribute also collects dead rows from whatever else
+# the cluster does after the slot is created, and that number moved between runs (6,000 and 6,021). So
+# the scenario clears what it can first and reports only the rows its own churn added.
+psql_q -c "VACUUM pg_catalog.pg_attribute"
+before=$(val "SELECT dead_tuple_count FROM pgstattuple('pg_catalog.pg_attribute')")
 # Catalog churn: each temporary table adds and then deletes rows in pg_class, pg_attribute, pg_type.
 psql_q -c "DO \$\$ BEGIN FOR i IN 1..300 LOOP EXECUTE 'CREATE TEMP TABLE bloat_scen_tmp (a int, b text, c text); DROP TABLE bloat_scen_tmp'; END LOOP; END \$\$"
 settle_stats
@@ -22,6 +27,8 @@ vacuum_says s2_orders
 say "VACUUM (VERBOSE) pg_catalog.pg_attribute"
 psql -X -c "SET client_min_messages = info" -c "VACUUM (VERBOSE) pg_catalog.pg_attribute" 2>&1 \
     | grep -E 'tuples: |removable cutoff|oldest xmin|found [0-9]+ removable' | head -2 | sed 's/^/  pg_attribute /'
+after=$(val "SELECT dead_tuple_count FROM pgstattuple('pg_catalog.pg_attribute')")
+note "dead rows in pg_attribute that VACUUM left, added by the 300 temporary-table cycles: $((after - before))"
 say "evidence: the slot"
 psql -X -P pager=off -c "
 SELECT slot_name, slot_type, active, xmin, catalog_xmin, age(catalog_xmin) AS catalog_xmin_age

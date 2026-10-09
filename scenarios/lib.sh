@@ -35,7 +35,30 @@ setup_schema() {
 # Cumulative statistics are flushed asynchronously: by the stats collector on 14, and by each backend
 # at transaction end, at most once a second, on 15 and later. A counter read too early reports the
 # state before the writes, so every report waits for them to land.
-settle_stats() { sleep 2; }
+settle_stats() { sleep 2; wait_for_standby_feedback; }
+
+# A standby with hot_standby_feedback reports its horizon every wal_receiver_status_interval (10 s by
+# default), and until it does the primary keeps an OLDER xmin on its slot. Measured on the s3 pairs:
+# without this wait, s2's user table showed 100,000 dead rows "not yet removable" in one run of two, and
+# s6's in-page pruning removed different amounts (pgstattuple counted 133,334 and 200,001). So before
+# measuring, wait until every active physical slot has caught up with the oldest horizon the primary
+# itself holds: the current xid, or an older open transaction or prepared transaction where a scenario
+# put one. No physical slot means nothing to wait for. s3 pins the slot on purpose and sets
+# BC_NO_FEEDBACK_WAIT. Times out after 30 s rather than hang, and says so.
+wait_for_standby_feedback() {
+    [ -n "${BC_NO_FEEDBACK_WAIT:-}" ] && return 0
+    [ "$(val "SELECT count(*) FROM pg_replication_slots WHERE slot_type = 'physical' AND active")" = 0 ] && return 0
+    local target i
+    target=$(val "SELECT least(txid_current(),
+        (SELECT min(backend_xmin::text::bigint) FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND backend_type = 'client backend'),
+        (SELECT min(backend_xid::text::bigint) FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND backend_type = 'client backend'),
+        (SELECT min(transaction::text::bigint) FROM pg_prepared_xacts))")
+    for i in $(seq 1 150); do
+        [ "$(val "SELECT coalesce(min(xmin::text::bigint), $target) >= $target FROM pg_replication_slots WHERE slot_type = 'physical' AND active")" = t ] && return 0
+        sleep 0.2
+    done
+    note "standby feedback did not catch up within 30 s; figures below may include its lag"
+}
 
 # A session that sits "idle in transaction" until teardown kills it. psql blocks on the shell escape,
 # so the server sees an open transaction with nothing running. $1 is a name, $2 the SQL to run first.

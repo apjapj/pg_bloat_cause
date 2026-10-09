@@ -13,8 +13,9 @@ VACUUM (VERBOSE) s2_orders
  removable cutoff: <XID>, which was <XIDAGE> XIDs old when operation ended
 
 VACUUM (VERBOSE) pg_catalog.pg_attribute
- pg_attribute tuples: <N> removed, <N> remain, 6000 are dead but not yet removable
+ pg_attribute tuples: <N> removed, <N> remain, <N> are dead but not yet removable
  pg_attribute removable cutoff: <XID>, which was <XIDAGE> XIDs old when operation ended
+ dead rows in pg_attribute that VACUUM left, added by the 300 temporary-table cycles: 6000
 
 evidence: the slot
  slot_name | slot_type | active | xmin | catalog_xmin | catalog_xmin_age

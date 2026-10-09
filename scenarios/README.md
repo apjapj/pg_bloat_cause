@@ -21,9 +21,14 @@ export PGHOST=127.0.0.1 PGPORT=5618 PGUSER=postgres PGPASSWORD=...
 ./scenarios/teardown.sh                # remove everything any scenario left behind
 ```
 
+s3 also needs a hot standby of the server, given as `BC_STANDBY_PORT`. `scenarios/standby.sh 18 5718 5719`
+builds a primary on 5718 and a standby on 5719 from the matrix image (`standby.sh 18 down` removes
+them), and the evidence below was made against such pairs. Without `BC_STANDBY_PORT`, s3 is skipped and
+says so.
+
 Run them on a **scratch server**. A horizon holder pins the whole cluster, not one database, and s7
 burns 110,000 transaction ids. They need a superuser, `pgstattuple`, `max_prepared_transactions > 0`
-for s4, and `wal_level = logical` for s2. Set `BC_CONTAINER` to the server's Docker container name
+for s4, `wal_level = logical` for s2, and a hot standby with `hot_standby_feedback = on` for s3. Set `BC_CONTAINER` to the server's Docker container name
 and s7 also reads its log.
 
 **Starting a throwaway server for them.** Pass the settings as `postgres -c` arguments to `docker run`,
@@ -45,7 +50,7 @@ when the server stops, so the container goes with it and the change never takes 
 |---|---|---|---|
 | `s1_idle_in_transaction` | 100,000 rows updated while a session sits idle in transaction holding an xid | VACUUM removes **[0](evidence/s1_idle_in_transaction.pg18.txt)** of the [100,000](evidence/s1_idle_in_transaction.pg18.txt) dead rows ([100000](evidence/s1_idle_in_transaction.pg14.txt) on 14); the holder is named with its xid age | 14, 18 |
 | `s2_logical_slot` | an inactive logical slot, 100,000 dead rows in a user table, 300 temporary-table cycles | **A logical slot does not hold back a user table.** VACUUM removed all [100,000](evidence/s2_logical_slot.pg18.txt) dead rows of `s2_orders` ([100000](evidence/s2_logical_slot.pg14.txt) on 14) and could not remove [6,000](evidence/s2_logical_slot.pg18.txt) in `pg_attribute` ([6000](evidence/s2_logical_slot.pg14.txt) on 14). The slot has `xmin` NULL and only `catalog_xmin` set | 14, 18 (needs `wal_level = logical`) |
-| `s3_standby_feedback` | nothing | Skipped: needs a primary and a standby, and the matrix images are single servers. The skip is in its own [evidence file](evidence/s3_standby_feedback.pg18.txt) | none yet |
+| `s3_standby_feedback` | a primary and a hot standby with `hot_standby_feedback = on` and a physical slot, a REPEATABLE READ query left open **on the standby**, then 100,000 rows updated on the primary | VACUUM on the primary removes [0](evidence/s3_standby_feedback.pg18.txt) of [100,000](evidence/s3_standby_feedback.pg18.txt) ([100000](evidence/s3_standby_feedback.pg14.txt) on 14). The primary sees the standby's horizon **only on the slot's `xmin`**; the walsender's `backend_xmin` is NULL. Ending the standby's query and nothing else, the same VACUUM then removes all [100000](evidence/s3_standby_feedback.pg18.txt) | 14, 18 (needs a standby: `standby.sh`) |
 | `s4_prepared_transaction` | 100,000 rows updated after a prepared transaction took an xid | VACUUM removes [0](evidence/s4_prepared_transaction.pg18.txt) of [100,000](evidence/s4_prepared_transaction.pg18.txt); the gid, its xid age and owner are named | 14, 18 |
 | `s5_autovacuum_disabled` | two identical tables, half of each updated, one with `autovacuum_enabled = false` | The control was autovacuumed to [0](evidence/s5_autovacuum_disabled.pg18.txt) dead; the disabled one kept [50,000](evidence/s5_autovacuum_disabled.pg18.txt), against a trigger threshold of [20,050](evidence/s5_autovacuum_disabled.pg18.txt) | 14, 18 |
 | `s6_thresholds_too_high` | per-table thresholds of 5,000,000 plus 0.5 per row, three rounds of updates | No autovacuum ran (`autovacuum_count` [0](evidence/s6_thresholds_too_high.pg18.txt)). The usual query said **[199,996](evidence/s6_thresholds_too_high.pg18.txt)** dead rows ([66.7](evidence/s6_thresholds_too_high.pg18.txt)%); `pgstattuple` measured **[66,667](evidence/s6_thresholds_too_high.pg18.txt)** ([20.8](evidence/s6_thresholds_too_high.pg18.txt)%) | 14, 18 |
@@ -53,10 +58,10 @@ when the server stops, so the container goes with it and the change never takes 
 | `s8_non_hot_updates` | four 20,000-row tables, every row updated once | See the table below. `n_tup_newpage_upd` cannot tell an indexed-column update from a full page | 14 (without newpage), 18 |
 | `s9_two_causes` | `autovacuum_enabled = false` and a horizon holder on one table | Manual VACUUM removes [0](evidence/s9_two_causes.pg18.txt) of [100,000](evidence/s9_two_causes.pg18.txt), so the holder ranks first; the disabled autovacuum only matters once it is gone | 14, 18 |
 
-Every run above was on PostgreSQL 14.24 and 18.6, in throwaway containers built from the
-pg_lock_tree matrix images (`pg-dev-infra-pg14`, `pg-dev-infra-pg18`), started with `wal_level =
-logical`, `max_prepared_transactions = 10`, `log_autovacuum_min_duration = 0` and **`autovacuum_naptime
-= 10s`**. The short naptime makes the waits in s5 to s7 forty seconds instead of four minutes; nothing
+Every run above was on PostgreSQL 14.24 and 18.6, on a primary/standby pair per version built by
+`standby.sh` from the pg_lock_tree matrix images (`pg-dev-infra-pg14`, `pg-dev-infra-pg18`). The
+primary runs with `wal_level = logical`, `max_prepared_transactions = 10`, `log_autovacuum_min_duration
+= 0` and **`autovacuum_naptime = 10s`**; the standby with `hot_standby_feedback = on`. The short naptime makes the waits in s5 to s7 forty seconds instead of four minutes; nothing
 else depends on it. The two versions agreed on every count above.
 
 ### s8: what the counters can and cannot say
@@ -99,6 +104,13 @@ exist and the finding says it cannot separate the two.
   autovacuum ran on s1 during the hold and removed nothing. That is timing, did not recur in the two
   evidence runs, and is recorded as an observation, not evidence. The mechanism it illustrates is the
   one s1 does evidence: while the holder exists, no VACUUM removes anything.
+- **A standby's horizon is on its slot, not its walsender** (s3). With a physical slot, the
+  walsender's `backend_xmin` is NULL and the slot's `xmin` carries the standby's horizon. A finding
+  that looks only at `pg_stat_replication` would miss it entirely. And the primary never sees the
+  standby's query: the fix has to be named as being on the standby.
+- **A healthy standby still delays cleanup by up to its feedback interval.** Not a cause worth a
+  finding on its own, but it means "dead rows just made, not yet removable" is normal for about ten
+  seconds on a primary with a feedback standby, and a finding must not fire on that.
 - **Two fixture bugs of my own, both fixed.** The first `ANALYZE` ran in the same session as the
   insert, whose statistics flushed afterwards, so the usual query reported 200,000 live rows in a
   100,000-row table. And s7's first draft changed a reloption while its own holder had the table
@@ -115,11 +127,20 @@ expressions are not reused, because its broadest rules would mask the row counts
 to show. Every row count, dead-row count, percentage and threshold is left as it ran.
 
 **Reproducible, checked.** The committed files came from a run on PostgreSQL 14.24 and 18.6, and a
-second consecutive run on each produced byte-identical masked files for all 18. Getting there took
-two fixture fixes, both of which were races rather than masking gaps: s2 lets autovacuum reach its
-table first in some runs, so it now disables autovacuum on that table; and s7's raw
-`age(relfrozenxid)` moved by one xid between runs, so it now prints the fact that matters (over
-110,000) instead.
+second consecutive run on each produced byte-identical masked files for all 18. Every fix that took
+was to a fixture, not to the mask:
+
+- autovacuum reaching a table during a hold made `last_autovacuum` differ (s1, s2), so the tables
+  whose evidence is a manual VACUUM (s1 to s4, s9) run with autovacuum disabled;
+- s7's raw `age(relfrozenxid)` moved by one xid, so it prints the fact that matters (over 110,000);
+- `pg_attribute`'s dead-row count moved with unrelated catalog activity (6,000 and 6,021), so s2
+  reports only the rows its own churn added;
+- **a standby's feedback lags.** With `hot_standby_feedback` on, the standby reports its horizon every
+  `wal_receiver_status_interval` (10 s by default), and until then the primary holds an older xmin on
+  its slot. That made s2's user table briefly unvacuumable in one run, and changed how much s6's
+  in-page pruning removed. `settle_stats` now waits until every active physical slot has caught up
+  with the primary's own oldest horizon, and s6 waits between its update rounds. s3 pins the slot
+  deliberately and skips the wait.
 
 To regenerate and to check:
 

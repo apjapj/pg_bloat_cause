@@ -12,6 +12,9 @@ setup_schema
 make_table s6_orders 100000 "WITH (autovacuum_vacuum_threshold = 5000000, autovacuum_vacuum_scale_factor = 0.5, autovacuum_vacuum_insert_threshold = 5000000, autovacuum_vacuum_insert_scale_factor = 0.5)"
 for round in 1 2 3; do
     psql_q -c "UPDATE $SCHEMA.s6_orders SET status = 'round $round' WHERE id % 3 <> 0"
+    # Each round prunes the previous round's dead versions in place where the horizon allows, so a
+    # standby's feedback lag between rounds changes how many are left (133,334 and 200,001 in two runs).
+    wait_for_standby_feedback
 done
 naptime=$(val "SELECT setting::int FROM pg_settings WHERE name = 'autovacuum_naptime'")
 note "waiting $((naptime * 4)) s, four autovacuum naptimes"

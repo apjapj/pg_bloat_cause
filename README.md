@@ -27,7 +27,7 @@ an ordinary table's. With an inactive slot in place, VACUUM removed all
 
 | Cause | What it means | Where the evidence is |
 |---|---|---|
-| **Something holding back VACUUM** | The xmin horizon is pinned, so dead rows cannot be removed however often VACUUM runs | `pg_stat_activity.backend_xmin` / `backend_xid` (long transaction), `pg_replication_slots.xmin` (physical slot fed by a standby; a logical slot's `catalog_xmin` holds back catalog tables only), `pg_stat_replication.backend_xmin` (standby with `hot_standby_feedback`), `pg_prepared_xacts` (orphaned prepared transaction) |
+| **Something holding back VACUUM** | The xmin horizon is pinned, so dead rows cannot be removed however often VACUUM runs | `pg_stat_activity.backend_xmin` / `backend_xid` (long transaction), `pg_replication_slots.xmin` (a standby with `hot_standby_feedback` and a physical slot: measured in s3, its horizon shows HERE and `pg_stat_replication.backend_xmin` is NULL; a logical slot's `catalog_xmin` holds back catalog tables only), `pg_stat_replication.backend_xmin` (a standby with feedback and no slot), `pg_prepared_xacts` (orphaned prepared transaction) |
 | **Autovacuum falling behind or off** | VACUUM could clean up but is not running often enough, or at all, for this table | `pg_stat_user_tables` (`n_dead_tup`, `last_autovacuum`, `autovacuum_count`, `n_mod_since_analyze`, `n_ins_since_vacuum`), `reloptions` (`autovacuum_enabled=false`, per-table thresholds), BOTH computed trigger thresholds (dead-row and, since 13, insert-based: either one firing cleans the table), `pg_stat_progress_vacuum` |
 | **Autovacuum kept off the table by a lock** | An ordinary autovacuum does **not** wait for a lock: it skips the table and tries again next naptime, so nothing shows in `pg_stat_activity`. Only an anti-wraparound autovacuum waits, visibly | For the ordinary case: a stale `last_autovacuum` with dead rows over the threshold, and a session holding a conflicting lock in `pg_locks` (the server log says `skipping vacuum ... lock not available` when `log_autovacuum_min_duration >= 0`). For the anti-wraparound case: `backend_type = 'autovacuum worker'` with `wait_event_type = 'Lock'`. pg_lock_tree, when installed, names the holder |
 | **Updates that cannot stay on the page** | Non-HOT updates, because an indexed column changes or the page has no room (`fillfactor`) | `n_tup_upd` vs `n_tup_hot_upd`; on PG 16+ `n_tup_newpage_upd` counts updates that moved to a new page, which is evidence for "no room" (see the scenarios for how cleanly); on 14 and 15 the finding says it cannot tell the two apart |
@@ -86,9 +86,10 @@ there, so every later step has something to be right about. At least:
 Each scenario should also print what the usual hand-written query reports, so the README can show
 the difference rather than claim it.
 
-**Done, in [`scenarios/`](scenarios/README.md).** Eight of the nine run on PostgreSQL 14 and 18; the
-standby scenario is skipped for want of a second server. Three of them corrected this document: the
-logical-slot example above, the lock row in the causes table, and the threshold row.
+**Done, in [`scenarios/`](scenarios/README.md).** All nine run on PostgreSQL 14 and 18; s3 needs a
+primary/standby pair, which `scenarios/standby.sh` builds. Four of them corrected this document: the
+logical-slot example above, the lock row in the causes table, the threshold row, and where a
+standby's horizon shows (on its slot, not its walsender).
 
 ### 3. ~~Define the ranking~~ **Done: [docs/ranking.md](docs/ranking.md)**
 
