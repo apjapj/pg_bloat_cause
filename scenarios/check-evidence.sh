@@ -12,7 +12,10 @@ cd "$(dirname "$0")/.."
 
 fail=0 n=0
 check_doc() {
-    local doc=$1 base=$2 link fig path file want
+    # Paths resolve against the document's own directory, which is what a renderer does: README.md
+    # links to scenarios/evidence/..., docs/ranking.md to ../scenarios/evidence/...
+    local doc=$1 base link fig path file want
+    base=$(dirname "$doc")
     while IFS= read -r link; do
         fig=${link#\[}; fig=${fig%%\]*}
         path=${link#*\(}; path=${path%\)}
@@ -25,10 +28,11 @@ check_doc() {
         elif ! grep -qE "(^|[^0-9.,])(${want//./\\.}|${fig%\%})([^0-9,]|$)" "$file"; then
             printf '  FAIL  %s cites %s in %s, which does not contain it\n' "$doc" "$fig" "$path"; fail=1
         fi
-    done < <(grep -oE '\[[0-9][0-9,.]*%?\]\((scenarios/)?evidence/[^)]+\)' "$doc")
+    done < <(grep -oE '\[[0-9][0-9,.]*%?\]\(([.][.]/)?(scenarios/)?evidence/[^)]+\)' "$doc")
 }
-check_doc README.md .
-check_doc scenarios/README.md scenarios
+for doc in README.md scenarios/README.md docs/*.md; do
+    [ -f "$doc" ] && check_doc "$doc"
+done
 
 if [ "$n" -eq 0 ]; then
     echo "  FAIL  no evidence links found at all, so nothing was checked"; exit 1

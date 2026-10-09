@@ -90,9 +90,13 @@ the difference rather than claim it.
 standby scenario is skipped for want of a second server. Three of them corrected this document: the
 logical-slot example above, the lock row in the causes table, and the threshold row.
 
-### 3. Define the ranking
+### 3. ~~Define the ranking~~ **Done: [docs/ranking.md](docs/ranking.md)**
 
-The overview promises "ranks why dead rows aren't being cleaned up". Write down the rule before the
+Settled before any SQL. Per table, the primary finding is the most upstream cause present, and every
+other cause is a secondary line under it; s9 is the worked case. One part is still open there: when a
+horizon holder exists but is not the reason a table's rows stay.
+
+What follows is the proposal it started from. The overview promises "ranks why dead rows aren't being cleaned up". Write down the rule before the
 code. Proposed: a horizon holder outranks everything, because nothing else is fixable while it is
 there; then a lock wait; then autovacuum off or behind; then HOT efficiency, which is a tuning
 finding rather than an incident. Within a cause, rank by dead bytes, not dead-row share, so a small
