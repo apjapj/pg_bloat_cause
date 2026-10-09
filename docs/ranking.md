@@ -174,3 +174,25 @@ the holder binds. Proposed: the holder is primary when that evidence exists, or 
 older than the table's last vacuum; otherwise it is a secondary line marked "may be holding these
 back", and the next cause down is primary. This needs a fixture before it is code: s5's table with a
 session opened after the updates.
+
+**A table that has never been vacuumed is the case that test cannot answer.** With `last_vacuum` and
+`last_autovacuum` both NULL there is no vacuum to compare the holder's start against, and comparing
+against NULL must not fall through to "the holder binds": that would make every never-cleaned table
+look held back by whichever session happens to be open, which is the same trap pg_lock_tree's alert
+state fell into when a wait recorded on every sample made "has it grown" permanently true. So the rule
+for this case is explicit: **no vacuum, no binding verdict.** The finding says what is known and stops:
+
+```
+s10_orders: 100,000 dead rows (47.07%, measured). Cause not established: this table has never been
+vacuumed, so it cannot be told whether session bloat_scen_s10 (idle in transaction for 4 min) is
+holding these rows back. Run VACUUM (VERBOSE) on it: "dead but not yet removable" above zero means the
+session binds.
+```
+
+Here the holder is reported as present, not as the cause, and the next step offered is the one that
+settles it: a VACUUM, whose "dead but not yet removable" count is the binding test the extension cannot
+run itself. Other causes the table has (autovacuum disabled, thresholds) are still reported as usual,
+since they need no vacuum history to establish. The figures in this sentence are illustrative.
+Fixtures needed: one never-vacuumed table with a holder opened **before** its updates (binding, but
+unprovable without a vacuum) and one with a holder opened **after** (not binding), so the finding can be
+shown to say the same honest thing for both rather than guessing right in one.
