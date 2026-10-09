@@ -34,6 +34,9 @@ MASKS=(
   's/^ (horizon holder) \| (bloat_scen_s9) +\| [0-9]+ *$/ \1 | \2 | <XIDAGE>/'
   # s3: a physical slot's xmin age
   's/(xmin set, xmin age )[0-9]+/\1<XIDAGE>/'
+  # the extension's own sentences: a session's pid, and the age after "for"
+  's/session [0-9]+ \(/session <PID> (/g'
+  's/ for [0-9]+(s| min| h [0-9]{2} min| days)([.,;]| \()/ for <AGE>\2/g'
   # an autovacuum worker's pid
   's/^ *[0-9]+ \| (Lock|autovacuum worker)/<PID> | \1/'
   # pg_attribute is the CATALOG, not the fixture: how many rows it has removed and kept depends on

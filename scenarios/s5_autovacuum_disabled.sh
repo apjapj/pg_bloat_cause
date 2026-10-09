@@ -21,5 +21,9 @@ SELECT c.relname, c.reloptions, s.n_dead_tup,
          + current_setting('autovacuum_vacuum_scale_factor')::float8 * c.reltuples AS would_trigger_at
   FROM pg_class c JOIN pg_stat_user_tables s ON s.relid = c.oid
  WHERE s.schemaname = '$SCHEMA' AND c.relname IN ('s5_orders', 's5_control') ORDER BY 1"
+finding s5_orders
+assert_finding s5_orders 'autovacuum disabled' '' '' '%50000 dead rows against a threshold of 20050%'
+finding s5_control
+assert_finding s5_control none
 expected "autovacuum is switched off for s5_orders (autovacuum_enabled=false); s5_control, changed
   identically, was vacuumed. The fix is ALTER TABLE ... RESET (autovacuum_enabled), then VACUUM."

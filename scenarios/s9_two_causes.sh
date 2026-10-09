@@ -19,5 +19,7 @@ SELECT 'horizon holder' AS cause, application_name AS what, age(backend_xid)::te
 UNION ALL
 SELECT 'autovacuum off', relname, array_to_string(reloptions, ',')
   FROM pg_class WHERE oid = '$SCHEMA.s9_orders'::regclass"
+finding s9_orders
+assert_finding s9_orders 'horizon holder' '%autovacuum is disabled%' '' 'held back by session %bloat_scen_s9%'
 expected "rank 1: held back by session bloat_scen_s9 (a manual VACUUM above removed nothing).
   rank 2: autovacuum disabled on s9_orders, which matters only once the holder is gone."

@@ -33,5 +33,9 @@ say "evidence: the slot"
 psql -X -P pager=off -c "
 SELECT slot_name, slot_type, active, xmin, catalog_xmin, age(catalog_xmin) AS catalog_xmin_age
   FROM pg_replication_slots WHERE slot_name = 'bloat_scen_slot'"
+# The slot must not be named for the user table. After the manual VACUUM above it has no dead rows, so
+# it should not appear at all; and a logical slot is never in the extension's list of holders.
+finding s2_orders
+assert_finding s2_orders none
 expected "NOT the user table: s2_orders' dead rows are removable. The slot holds back catalog rows
   only (pg_attribute above), and the WAL it retains. A finding that blames it for a user table is wrong."

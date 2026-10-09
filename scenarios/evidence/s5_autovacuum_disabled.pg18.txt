@@ -18,6 +18,14 @@ evidence: the reloption and the trigger threshold
 (2 rows)
 
 
+what pg_bloat_cause says about s5_orders
+ s5_orders: 50000 dead rows (33.3%, estimated), autovacuum is disabled on this table (50000 dead rows against a threshold of 20050). Then: 50000 of 50000 updates were not HOT; how many of them because an indexed column changed cannot be told.
+ PASS s5_orders: cause autovacuum disabled
+
+what pg_bloat_cause says about s5_control
+ (no finding: s5_control does not appear)
+ PASS s5_control: cause none
+
 expected cause
  autovacuum is switched off for s5_orders (autovacuum_enabled=false); s5_control, changed
  identically, was vacuumed. The fix is ALTER TABLE ... RESET (autovacuum_enabled), then VACUUM.

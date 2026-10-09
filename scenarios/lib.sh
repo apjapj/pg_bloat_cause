@@ -123,3 +123,50 @@ vacuum_says() {
 }
 
 expected() { say "expected cause"; note "$1"; }
+
+# ---------------------------------------------------------------- the extension's own finding
+#
+# When pg_bloat_cause is available on the server, each scenario also prints what the extension says
+# about its table and asserts the finding docs/ranking.md predicts. Holders younger than a few seconds
+# are ignored by default in the extension (one minute); the scenarios pass 2 seconds, since their
+# holders are seconds old. The standby gap stays at the extension's default of 1000 xids except in s3,
+# whose standby query pins only a few, which sets BC_STANDBY_XID_GAP. A "FAIL" line makes run.sh
+# report the scenario as FAILED.
+has_extension() {
+    [ "$(val "SELECT count(*) FROM pg_available_extensions WHERE name = 'pg_bloat_cause'")" = 1 ]
+}
+finding() {   # $1 table
+    has_extension || { note "pg_bloat_cause is not installed on this server; finding not checked"; return 0; }
+    sleep 1
+    psql_q -c "CREATE EXTENSION IF NOT EXISTS pg_bloat_cause" 2>/dev/null
+    say "what pg_bloat_cause says about $1"
+    local line
+    line=$(val "SELECT t FROM bloat_cause_text(interval '2 seconds', ${BC_STANDBY_XID_GAP:-1000}) t WHERE t LIKE '$1: %'")
+    note "${line:-(no finding: $1 does not appear)}"
+}
+# $1 table, $2 expected cause (or 'none' for no row, or 'null' for a row with no cause),
+# $3 a LIKE pattern every "then" must include (or ''), $4 a LIKE pattern "unknowns" must include ('' means
+# unknowns must be empty), $5 a LIKE pattern for the cause detail (or '').
+assert_finding() {
+    has_extension || return 0
+    local t=$1 want=$2 thenp=${3:-} unkp=${4:-} detp=${5:-} got
+    got=$(val "SELECT coalesce(cause, 'null') || '|' || coalesce(cause_detail, '') || '|'
+                      || array_to_string(\"then\", ' ;; ') || '|' || array_to_string(unknowns, ' ;; ')
+                 FROM bloat_cause_findings(interval '2 seconds', ${BC_STANDBY_XID_GAP:-1000}) WHERE relname = '$t'")
+    local cause=${got%%|*} rest=${got#*|}
+    local detail=${rest%%|*}; rest=${rest#*|}
+    local thens=${rest%%|*} unks=${rest#*|}
+    local bad=""
+    if [ -z "$got" ]; then
+        [ "$want" = none ] || bad="$bad; no row, expected cause '$want'"
+    else
+        [ "$want" = none ] && bad="$bad; expected no row, got cause '$cause'"
+        [ "$want" != none ] && [ "$cause" != "$want" ] && bad="$bad; cause is '$cause', expected '$want'"
+        [ -n "$detp" ] && [ "$(val "SELECT \$\$${detail}\$\$ LIKE \$\$${detp}\$\$")" != t ] && bad="$bad; detail does not match '$detp'"
+        [ -n "$thenp" ] && [ "$(val "SELECT \$\$${thens}\$\$ LIKE \$\$${thenp}\$\$")" != t ] && bad="$bad; then does not match '$thenp'"
+        if [ -z "$unkp" ]; then [ -n "$unks" ] && bad="$bad; unknowns not empty"
+        else [ "$(val "SELECT \$\$${unks}\$\$ LIKE \$\$${unkp}\$\$")" != t ] && bad="$bad; unknowns do not match '$unkp'"; fi
+    fi
+    if [ -z "$bad" ]; then note "PASS  $t: cause $want${thenp:+, then $thenp}${unkp:+, unknowns $unkp}"
+    else note "FAIL  $t${bad}"; fi
+}

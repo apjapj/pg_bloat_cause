@@ -31,5 +31,7 @@ SELECT c.relname, c.reloptions, s.n_dead_tup, s.autovacuum_count,
                   current_setting('autovacuum_vacuum_scale_factor')::float8) * c.reltuples AS would_trigger_at
   FROM pg_class c JOIN pg_stat_user_tables s ON s.relid = c.oid
  WHERE s.schemaname = '$SCHEMA' AND c.relname = 's6_orders'"
+finding s6_orders
+assert_finding s6_orders 'autovacuum thresholds not reached' '' '' '%5050000 dead rows, 5050000 inserted rows%'
 expected "autovacuum is enabled but s6_orders' own threshold (5,000,000 + 0.5 x rows) is far above
   its dead rows, so it never triggers. The fix is to reset or lower the per-table thresholds."

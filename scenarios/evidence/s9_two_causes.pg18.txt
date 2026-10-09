@@ -19,6 +19,10 @@ evidence: both causes
 (2 rows)
 
 
+what pg_bloat_cause says about s9_orders
+ s9_orders: 100000 dead rows (50.0%, estimated), held back by session <PID> (bloat_scen_s9, idle in transaction) for <AGE>. Then: autovacuum is disabled on this table (100000 dead rows against a threshold of 20050); 100000 of 100000 updates were not HOT; how many of them because an indexed column changed cannot be told.
+ PASS s9_orders: cause horizon holder, then %autovacuum is disabled%
+
 expected cause
  rank 1: held back by session bloat_scen_s9 (a manual VACUUM above removed nothing).
  rank 2: autovacuum disabled on s9_orders, which matters only once the holder is gone.

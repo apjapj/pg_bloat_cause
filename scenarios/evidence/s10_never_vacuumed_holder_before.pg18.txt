@@ -14,11 +14,19 @@ measured (pgstattuple)
  finding: cause not established; the table has never been vacuumed, so it cannot be told
  whether session bloat_scen_s10 is holding these rows back. Run VACUUM (VERBOSE) on it.
 
+what pg_bloat_cause says about s10_orders
+ s10_orders: 100000 dead rows (50.0%, estimated), autovacuum is disabled on this table (100000 dead rows against a threshold of 20050). Then: 100000 of 100000 updates were not HOT; how many of them because an indexed column changed cannot be told. Not established: session <PID> (bloat_scen_s10, idle in transaction) is present, but whether it holds these rows back is not established: this table has never been vacuumed. Run VACUUM (VERBOSE) on it; "dead but not yet removable" above zero means it does.
+ PASS s10_orders: cause autovacuum disabled, unknowns %bloat_scen_s10%not established: this table has never been vacuumed%
+
 part 2: the finding's instruction, followed
 
 VACUUM (VERBOSE) s10_orders
  tuples: 0 removed, 200000 remain, 100000 are dead but not yet removable
  removable cutoff: <XID>, which was <XIDAGE> XIDs old when operation ended
+
+what pg_bloat_cause says about s10_orders
+ s10_orders: 100000 dead rows (50.0%, estimated), held back by session <PID> (bloat_scen_s10, idle in transaction) for <AGE>. Then: autovacuum is disabled on this table (100000 dead rows against a threshold of 20050); 100000 of 100000 updates were not HOT; how many of them because an indexed column changed cannot be told.
+ PASS s10_orders: cause horizon holder, then %autovacuum is disabled%
 
 expected cause
  part 1 cannot tell. Part 2 shows the holder binds: VACUUM removes nothing, every dead row is

@@ -18,6 +18,10 @@ evidence: the prepared transaction
 (1 row)
 
 
+what pg_bloat_cause says about s4_orders
+ s4_orders: 100000 dead rows (50.0%, estimated), held back by prepared transaction 'bloat_scen_gxid' for <AGE>. Then: autovacuum is disabled on this table (100000 dead rows against a threshold of 20050); 100000 of 100000 updates were not HOT; on this version an indexed-column update cannot be told from a full page.
+ PASS s4_orders: cause horizon holder, then %autovacuum is disabled%
+
 expected cause
  held back by prepared transaction bloat_scen_gxid. No session to cancel: the fix is
  ROLLBACK PREPARED 'bloat_scen_gxid' (or COMMIT PREPARED if it should have committed).

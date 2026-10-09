@@ -14,6 +14,9 @@ sby() { PGPORT=$BC_STANDBY_PORT psql -X -At -v ON_ERROR_STOP=1 -c "$1"; }
 # This scenario pins the standby's slot on purpose, so the shared wait for feedback to catch up would
 # only ever time out.
 export BC_NO_FEEDBACK_WAIT=1
+# The standby's query here pins the slot only a few xids behind the primary, far under the extension's
+# default gap of 1000, which exists to keep an idle standby's feedback lag from reading as a cause.
+export BC_STANDBY_XID_GAP=1
 setup_schema
 # autovacuum off on the table, as in s2, so the manual VACUUM is the only thing acting on it.
 make_table s3_orders 100000 "WITH (autovacuum_enabled = false)"
@@ -53,6 +56,8 @@ say "evidence on the standby: the query holding it"
 sby "SELECT '  standby session ' || application_name || ': ' || state || ', backend_xmin '
             || CASE WHEN backend_xmin IS NULL THEN 'NULL' ELSE 'set' END
        FROM pg_stat_activity WHERE application_name = 'bloat_scen_s3'"
+finding s3_orders
+assert_finding s3_orders 'horizon holder' '' '' 'held back by standby % through slot standby_s3%the fix is there'
 # Part 2, the control: end the standby's query and VACUUM again. If the standby merely existing were
 # enough to hold the rows, this would still remove nothing. It is the query, so it should remove them
 # all once the slot's xmin has moved past the updates.

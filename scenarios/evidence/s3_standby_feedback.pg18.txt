@@ -19,6 +19,10 @@ evidence on the primary: where the standby's horizon shows
 evidence on the standby: the query holding it
  standby session bloat_scen_s3: idle in transaction, backend_xmin set
 
+what pg_bloat_cause says about s3_orders
+ s3_orders: 100000 dead rows (50.0%, estimated), held back by standby bc_standby_18 through slot standby_s3; the query holding it is on the standby, and the fix is there. Then: autovacuum is disabled on this table (100000 dead rows against a threshold of 20050); 100000 of 100000 updates were not HOT; how many of them because an indexed column changed cannot be told.
+ PASS s3_orders: cause horizon holder
+
 part 2: end the query on the standby, wait for feedback, VACUUM again
  slot xmin has moved past the updates: t
 

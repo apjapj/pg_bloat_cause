@@ -18,5 +18,7 @@ say "evidence: the prepared transaction"
 psql -X -P pager=off -c "
 SELECT gid, transaction, age(transaction) AS xid_age, prepared, now() - prepared AS open_for, owner
   FROM pg_prepared_xacts WHERE gid = 'bloat_scen_gxid'"
+finding s4_orders
+assert_finding s4_orders 'horizon holder' '%autovacuum is disabled%' '' "held back by prepared transaction 'bloat_scen_gxid'%"
 expected "held back by prepared transaction bloat_scen_gxid. No session to cancel: the fix is
   ROLLBACK PREPARED 'bloat_scen_gxid' (or COMMIT PREPARED if it should have committed)."

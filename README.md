@@ -104,9 +104,14 @@ there; then a lock wait; then autovacuum off or behind; then HOT efficiency, whi
 finding rather than an incident. Within a cause, rank by dead bytes, not dead-row share, so a small
 table at 90% does not outrank a large one at 40%.
 
-### 4. The first version: diagnose only
+### 4. ~~The first version: diagnose only~~ **Built: 0.1, not yet released**
 
-`bloat_cause` (view, one row per table with a cause) and `bloat_cause_text()` (the sentence form).
+`pg_bloat_cause--0.1.sql`: the view `bloat_cause`, `bloat_cause_findings()` behind it, and
+`bloat_cause_text()`. Every scenario asserts the finding this view gives for its table, on PostgreSQL 14
+and 18, and all pass; [docs/design.md](docs/design.md) records the decisions and what the scenarios
+and the grant test changed. [INSTALL.md](INSTALL.md) has the grants.
+
+The original plan for it: `bloat_cause` (view, one row per table with a cause) and `bloat_cause_text()` (the sentence form).
 No history, no alerting. This is the part that has to be right, and it is useful mid-incident on its
 own.
 

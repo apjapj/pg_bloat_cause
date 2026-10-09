@@ -17,6 +17,9 @@ for s in "$HERE"/s[0-9]_*.sh "$HERE"/s[0-9][0-9]_*.sh; do
     "$HERE/teardown.sh" >/dev/null
     bash "$s" > "$out/$name.pg$major.txt" 2>&1
     case $? in 0) r=ran ;; 3) r=SKIP ;; *) r=FAILED ;; esac
+    # An assertion about the extension's finding that did not hold fails the scenario, even though the
+    # script itself ran to the end.
+    [ "$r" = ran ] && grep -q '^  FAIL  ' "$out/$name.pg$major.txt" && r=FAILED
     mask_capture < "$out/$name.pg$major.txt" > "$evidence/$name.pg$major.txt"
     printf '  %-28s %s\n' "$name" "$r"
 done

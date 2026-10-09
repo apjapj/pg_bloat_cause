@@ -26,7 +26,11 @@ val "SELECT '  holder present: ' || application_name || ', ' || state
 note "finding: cause not established; the table has never been vacuumed, so it cannot be told"
 note "whether session bloat_scen_s10 is holding these rows back. Run VACUUM (VERBOSE) on it."
 
+finding s10_orders
+assert_finding s10_orders 'autovacuum disabled' '' '%bloat_scen_s10%not established: this table has never been vacuumed%'
 say "part 2: the finding's instruction, followed"
 vacuum_says s10_orders
+finding s10_orders
+assert_finding s10_orders 'horizon holder' '%autovacuum is disabled%' '' 'held back by session %bloat_scen_s10%'
 expected "part 1 cannot tell. Part 2 shows the holder binds: VACUUM removes nothing, every dead row is
   not yet removable. Opened before the updates, its xid is older than every dead row."

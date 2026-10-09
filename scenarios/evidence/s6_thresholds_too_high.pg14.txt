@@ -15,6 +15,10 @@ evidence: the table's threshold against its dead rows
 (1 row)
 
 
+what pg_bloat_cause says about s6_orders
+ s6_orders: 199996 dead rows (66.7%, estimated), its own autovacuum thresholds (5050000 dead rows, 5050000 inserted rows) are never reached. Then: 199977 of 200001 updates were not HOT; on this version an indexed-column update cannot be told from a full page.
+ PASS s6_orders: cause autovacuum thresholds not reached
+
 expected cause
  autovacuum is enabled but s6_orders' own threshold (5,000,000 + 0.5 x rows) is far above
  its dead rows, so it never triggers. The fix is to reset or lower the per-table thresholds.

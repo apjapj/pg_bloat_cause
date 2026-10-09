@@ -19,5 +19,7 @@ psql -X -P pager=off -c "
 SELECT pid, application_name, state, backend_xid, backend_xmin,
        age(backend_xid) AS xid_age, now() - xact_start AS open_for
   FROM pg_stat_activity WHERE application_name = 'bloat_scen_s1'"
+finding s1_orders
+assert_finding s1_orders 'horizon holder' '%autovacuum is disabled%' '' 'held back by session %bloat_scen_s1%'
 expected "held back by session bloat_scen_s1, idle in transaction since the updates. VACUUM removes
   nothing until it ends; terminating it is the fix, VACUUM is not."

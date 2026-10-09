@@ -100,7 +100,7 @@ Figures: [66,667](../scenarios/evidence/s6_thresholds_too_high.pg18.txt),
 
 **s7, a lock keeps vacuum off.** The lock is upstream of autovacuum, so a finding of "autovacuum is
 behind" on this table would be wrong: autovacuum tried and was refused. An ordinary autovacuum skipped
-the table [4](../scenarios/evidence/s7_autovacuum_vs_lock.pg18.txt) times in 40 seconds and never
+the table at least [3](../scenarios/evidence/s7_autovacuum_vs_lock.pg18.txt) times in 40 seconds and never
 appeared in `pg_stat_activity`, so the evidence is the lock, not a waiting worker:
 
 ```

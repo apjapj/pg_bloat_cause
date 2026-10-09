@@ -23,6 +23,10 @@ evidence: the slot
 (1 row)
 
 
+what pg_bloat_cause says about s2_orders
+ (no finding: s2_orders does not appear)
+ PASS s2_orders: cause none
+
 expected cause
  NOT the user table: s2_orders' dead rows are removable. The slot holds back catalog rows
  only (pg_attribute above), and the WAL it retains. A finding that blames it for a user table is wrong.

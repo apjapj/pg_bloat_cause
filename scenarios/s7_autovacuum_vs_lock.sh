@@ -32,12 +32,16 @@ SELECT pid, backend_type, wait_event_type, wait_event, left(query, 70) AS query
   FROM pg_stat_activity WHERE backend_type = 'autovacuum worker'"
 say "evidence, part 1: the server log, if this is one of the scenario containers"
 if [ -n "${BC_CONTAINER:-}" ]; then
-    docker logs --since "$SINCE" "$BC_CONTAINER" 2>&1 | grep -c 'skipping vacuum of "s7_orders" --- lock not available' \
-        | sed 's/^/  "skipping vacuum of s7_orders --- lock not available" lines: /'
+    # The exact count depends on where the 40 s wait falls against the naptime (4 in one run, 5 in the
+    # next), so the evidence records the fact that cannot move: at least three skips.
+    skips=$(docker logs --since "$SINCE" "$BC_CONTAINER" 2>&1 | grep -c 'skipping vacuum of "s7_orders" --- lock not available')
+    note "autovacuum logged \"skipping vacuum of s7_orders --- lock not available\" at least 3 times in 40 s: $([ "$skips" -ge 3 ] && echo true || echo "false ($skips)")"
 else
     note "BC_CONTAINER not set, log not read"
 fi
 
+finding s7_orders
+assert_finding s7_orders 'lock keeps vacuum off' '' '' '%bloat_scen_s7%ShareUpdateExclusiveLock%autovacuum skips the table'
 say "part 2: forcing an anti-wraparound autovacuum"
 psql_q -c "CREATE OR REPLACE PROCEDURE $SCHEMA.burn_xids(n int) LANGUAGE plpgsql AS \$\$
 BEGIN FOR i IN 1..n LOOP PERFORM txid_current(); COMMIT; END LOOP; END \$\$" -c "CALL $SCHEMA.burn_xids(110000)"
@@ -49,6 +53,8 @@ say "evidence, part 2: autovacuum workers now"
 psql -X -P pager=off -c "
 SELECT pid, wait_event_type, wait_event, left(query, 80) AS query
   FROM pg_stat_activity WHERE backend_type = 'autovacuum worker'"
+finding s7_orders
+assert_finding s7_orders 'lock blocks anti-wraparound vacuum' '' '' '%anti-wraparound autovacuum is waiting%bloat_scen_s7%'
 expected "part 1: autovacuum skipped s7_orders because session bloat_scen_s7 holds a conflicting
   lock; invisible except as a stale last_autovacuum and a log line. Part 2: an anti-wraparound
   autovacuum waits on the same lock, visibly. Either way the fix is to end the lock holder."

@@ -32,6 +32,15 @@ SELECT relname, n_tup_upd, n_tup_hot_upd, $newpage AS n_tup_newpage_upd,
        n_tup_upd - n_tup_hot_upd AS non_hot
   FROM pg_stat_user_tables WHERE schemaname = '$SCHEMA' AND relname LIKE 's8_%' ORDER BY relname"
 [ "$VER" -ge 160000 ] || note "n_tup_newpage_upd does not exist before 16: on this version the finding cannot separate 'no room' from 'indexed column' and must say so"
+for t in s8_indexed_room s8_indexed_full s8_plain_full s8_plain_room; do finding $t; done
+if [ "$VER" -ge 160000 ]; then
+    assert_finding s8_indexed_room 'autovacuum disabled' '%20000 updates were not HOT; at least 9000 because an indexed column changed%'
+    assert_finding s8_indexed_full 'autovacuum disabled' '%20000 of 20000 updates were not HOT; how many of them because an indexed column changed cannot be told%'
+else
+    assert_finding s8_indexed_room 'autovacuum disabled' '%not HOT; on this version an indexed-column update cannot be told from a full page%'
+    assert_finding s8_indexed_full 'autovacuum disabled' '%not HOT; on this version an indexed-column update cannot be told from a full page%'
+fi
+assert_finding s8_plain_room 'autovacuum disabled' ''
 expected "s8_plain_room all HOT. s8_indexed_* not HOT because an indexed column changed. s8_plain_full
   not HOT because the page had no room (fillfactor 100). See the README for whether newpage tells
   s8_indexed_full apart from s8_plain_full."

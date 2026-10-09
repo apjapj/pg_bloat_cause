@@ -18,6 +18,21 @@ evidence: HOT and new-page counts
 
  n_tup_newpage_upd does not exist before 16: on this version the finding cannot separate 'no room' from 'indexed column' and must say so
 
+what pg_bloat_cause says about s8_indexed_room
+ s8_indexed_room: 20000 dead rows (50.0%, estimated), autovacuum is disabled on this table (20000 dead rows against a threshold of 50). Then: 20000 of 20000 updates were not HOT; on this version an indexed-column update cannot be told from a full page.
+
+what pg_bloat_cause says about s8_indexed_full
+ s8_indexed_full: 20000 dead rows (50.0%, estimated), autovacuum is disabled on this table (20000 dead rows against a threshold of 50). Then: 20000 of 20000 updates were not HOT; on this version an indexed-column update cannot be told from a full page.
+
+what pg_bloat_cause says about s8_plain_full
+ s8_plain_full: 20000 dead rows (50.0%, estimated), autovacuum is disabled on this table (20000 dead rows against a threshold of 50). Then: 20000 of 20000 updates were not HOT; on this version an indexed-column update cannot be told from a full page.
+
+what pg_bloat_cause says about s8_plain_room
+ s8_plain_room: 20000 dead rows (50.0%, estimated), autovacuum is disabled on this table (20000 dead rows against a threshold of 50).
+ PASS s8_indexed_room: cause autovacuum disabled, then %not HOT; on this version an indexed-column update cannot be told from a full page%
+ PASS s8_indexed_full: cause autovacuum disabled, then %not HOT; on this version an indexed-column update cannot be told from a full page%
+ PASS s8_plain_room: cause autovacuum disabled
+
 expected cause
  s8_plain_room all HOT. s8_indexed_* not HOT because an indexed column changed. s8_plain_full
  not HOT because the page had no room (fillfactor 100). See the README for whether newpage tells
