@@ -288,3 +288,17 @@ $$;
 
 COMMENT ON FUNCTION @extschema@.bloat_cause_text(interval, bigint) IS
   'The findings as sentences, one per table, most dead bytes first: the primary cause with its age, then the secondary causes, then what is present but not established.';
+
+-- Privileges: closed by default, as pg_lock_tree does, and opened with explicit grants (INSTALL.md).
+--
+-- SECURITY INVOKER, deliberately, for both functions and the view. With SECURITY DEFINER the functions
+-- would read pg_stat_activity with the owner's rights, so any role granted EXECUTE would see other
+-- users' sessions without pg_read_all_stats, which is the privilege PostgreSQL uses to gate exactly
+-- that; and current_user inside them would be the owner, so the note telling a role what it cannot
+-- see could never fire. As invoker, a role sees what its own privileges allow, and the note says what
+-- is missing. Measured before this was written: the view refused every non-superuser (no grant on it),
+-- while the functions were executable by PUBLIC and gave such a role the note.
+--
+-- bloat_cause_age() stays PUBLIC: it formats an interval and reads nothing.
+REVOKE EXECUTE ON FUNCTION @extschema@.bloat_cause_findings(interval, bigint) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION @extschema@.bloat_cause_text(interval, bigint) FROM PUBLIC;

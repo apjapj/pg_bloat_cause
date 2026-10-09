@@ -90,6 +90,11 @@ min_standby_xid_gap)` takes it as an argument, and the scenarios pass two second
   `pg_read_all_stats`, a session holding the horizon is invisible and the finding silently became the
   next cause down. Every row now carries a "not established" note for such a role, so the gap in what
   it can see is stated, not hidden. INSTALL.md gives the grant.
+- **Closed by default, invoker's rights.** 0.1 first shipped with no grants: the view refused every
+  non-superuser while the functions were open to PUBLIC. It now revokes EXECUTE from PUBLIC, and
+  INSTALL.md gives the three grants. SECURITY DEFINER was considered and rejected: it would let any
+  role granted EXECUTE see other users' sessions without `pg_read_all_stats`, and `current_user` inside
+  would be the owner, so the "cannot see" note could never fire.
 - **A view over a function.** `bloat_cause` is a view over `bloat_cause_findings()`, because the
   version check for `n_tup_newpage_upd` needs a function body, and a function can take the minimum
   holder age.

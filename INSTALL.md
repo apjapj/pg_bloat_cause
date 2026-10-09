@@ -26,20 +26,32 @@ SELECT * FROM bloat_cause_text();
 
 ## Grants for a monitoring role
 
-Two grants, and the second one is not optional in practice:
+Nothing is open by default: the view has no grant and the two functions are not executable by PUBLIC,
+the same convention as pg_lock_tree. A monitoring role needs three grants:
 
 ```sql
-GRANT SELECT ON bloat_cause TO monitoring;   -- the view; the functions are executable by PUBLIC
+GRANT SELECT ON bloat_cause TO monitoring;
+GRANT EXECUTE ON FUNCTION bloat_cause_findings(interval, bigint),
+                          bloat_cause_text(interval, bigint) TO monitoring;
 GRANT pg_read_all_stats TO monitoring;       -- to see other users' sessions
 ```
 
-Without `pg_read_all_stats` a role sees other users' sessions with `backend_xmin` and `xact_start`
-hidden, so a session holding a table's dead rows back is invisible to it, and the finding drops to the
-next cause down. Measured on PostgreSQL 18 with one table, one holder and one role: with the grant the
-table read "held back by session ... (idle in transaction)"; without it, "autovacuum is disabled on this
-table". 0.1 does not let that pass silently: for a role without `pg_read_all_stats`, every row carries a
-"not established" note saying sessions holding rows back would not appear. But the right fix is the
-grant.
+**Why EXECUTE as well as SELECT.** PostgreSQL checks a function called inside a view against the role
+*using* the view, not the view's owner, so `SELECT ON bloat_cause` alone still fails on
+`bloat_cause_findings()`.
+
+**Why `pg_read_all_stats`.** Without it a role sees other users' sessions with `backend_xmin` and
+`xact_start` hidden, so a session holding a table's dead rows back is invisible to it. Measured on
+PostgreSQL 18 with one table, one holder and one role: with the grant the table read "held back by
+session ... (idle in transaction)"; without it, the cause read "autovacuum is disabled on this table".
+So for a role without `pg_read_all_stats`, every row carries a "not established" note saying a session
+holding these rows back would not appear, and the cause it gives is only what it can establish.
+`test/01_bloat_cause.sql` asserts that as a real role, alongside a role with no grants being refused.
+
+**Why not SECURITY DEFINER**, as pg_lock_tree's `lock_tree_sample()` is. That function writes, and needs
+its owner's rights to. These only read, and as definer they would show other users' sessions to any role
+granted EXECUTE, bypassing `pg_read_all_stats`, and the note telling a role what it cannot see could never
+fire. So they run with the caller's rights and say what those rights hide.
 
 Nothing else is needed. `pg_locks`, `pg_prepared_xacts` and `pg_replication_slots` are readable by any
 role, and `pg_relation_size()` needs no privilege on the table.
