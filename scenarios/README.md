@@ -57,6 +57,8 @@ when the server stops, so the container goes with it and the change never takes 
 | `s7_autovacuum_vs_lock` | an open `LOCK TABLE ... SHARE UPDATE EXCLUSIVE` with no xid, then 110,000 burned xids | Part 1: an ordinary autovacuum **does not wait**. No worker in `pg_stat_activity`, [4](evidence/s7_autovacuum_vs_lock.pg18.txt) `skipping vacuum ... lock not available` log lines in 40 s. Part 2: past an `age(relfrozenxid)` of [110,000](evidence/s7_autovacuum_vs_lock.pg18.txt) an anti-wraparound autovacuum **does** wait, with `wait_event_type = Lock` | 14, 18 |
 | `s8_non_hot_updates` | four 20,000-row tables, every row updated once | See the table below. `n_tup_newpage_upd` cannot tell an indexed-column update from a full page | 14 (without newpage), 18 |
 | `s9_two_causes` | `autovacuum_enabled = false` and a horizon holder on one table | Manual VACUUM removes [0](evidence/s9_two_causes.pg18.txt) of [100,000](evidence/s9_two_causes.pg18.txt), so the holder ranks first; the disabled autovacuum only matters once it is gone | 14, 18 |
+| `s10_never_vacuumed_holder_before` | a never-vacuumed table (autovacuum off), a session idle in transaction opened **before** 100,000 updates | Part 1: "never vacuumed", session present, [100,000](evidence/s10_never_vacuumed_holder_before.pg18.txt) dead rows measured, so the finding says "cause not established". Part 2, VACUUM (VERBOSE) as the finding instructs: [0](evidence/s10_never_vacuumed_holder_before.pg18.txt) removed, [100,000](evidence/s10_never_vacuumed_holder_before.pg18.txt) not yet removable: the session binds | 14, 18 |
+| `s11_never_vacuumed_holder_after` | the same, with the session opened **after** the updates | Part 1 identical to s10, which is why the rule gives no verdict. Part 2: all [100,000](evidence/s11_never_vacuumed_holder_after.pg18.txt) removed: the session does not bind | 14, 18 |
 
 Every run above was on PostgreSQL 14.24 and 18.6, on a primary/standby pair per version built by
 `standby.sh` from the pg_lock_tree matrix images (`pg-dev-infra-pg14`, `pg-dev-infra-pg18`). The
@@ -127,7 +129,8 @@ expressions are not reused, because its broadest rules would mask the row counts
 to show. Every row count, dead-row count, percentage and threshold is left as it ran.
 
 **Reproducible, checked.** The committed files came from a run on PostgreSQL 14.24 and 18.6, and a
-second consecutive run on each produced byte-identical masked files for all 18. Every fix that took
+second consecutive run on each produced byte-identical masked files: for s1 to s9's 18 files in one
+double run, and for s10 and s11's 4 files in a later one, on the same kind of primary/standby pair. Every fix that took
 was to a fixture, not to the mask:
 
 - autovacuum reaching a table during a hold made `last_autovacuum` differ (s1, s2), so the tables

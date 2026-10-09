@@ -1,0 +1,25 @@
+
+part 1: what can be established without a vacuum
+
+the usual hand-written query (pg_stat_user_tables)
+ relname | n_live_tup | n_dead_tup | dead_pct | last_autovacuum | last_vacuum
+ s11_orders | 100000 | 100000 | 50.0 | |
+(1 row)
+
+
+measured (pgstattuple)
+ s11_orders: 100000 live rows, 100000 dead rows, 47.07% of the table is dead tuples
+ never vacuumed: true
+ holder present: bloat_scen_s11, idle in transaction
+ finding: cause not established; the table has never been vacuumed, so it cannot be told
+ whether session bloat_scen_s11 is holding these rows back. Run VACUUM (VERBOSE) on it.
+
+part 2: the finding's instruction, followed
+
+VACUUM (VERBOSE) s11_orders
+ INFO: table "s11_orders": found 100000 removable, 100000 nonremovable row versions in 3449 out of 3449 pages
+ DETAIL: 0 dead row versions cannot be removed yet, oldest xmin: <XID>
+
+expected cause
+ part 1 cannot tell, and says the same as s10. Part 2 shows the holder does NOT bind: VACUUM
+ removes every dead row. Opened after the updates committed, its snapshot already sees them as dead.

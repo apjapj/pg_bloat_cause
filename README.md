@@ -86,7 +86,8 @@ there, so every later step has something to be right about. At least:
 Each scenario should also print what the usual hand-written query reports, so the README can show
 the difference rather than claim it.
 
-**Done, in [`scenarios/`](scenarios/README.md).** All nine run on PostgreSQL 14 and 18; s3 needs a
+**Done, in [`scenarios/`](scenarios/README.md).** All nine run on PostgreSQL 14 and 18, plus s10 and
+s11 for the never-vacuumed case in [docs/ranking.md](docs/ranking.md); s3 needs a
 primary/standby pair, which `scenarios/standby.sh` builds. Four of them corrected this document: the
 logical-slot example above, the lock row in the causes table, the threshold row, and where a
 standby's horizon shows (on its slot, not its walsender).

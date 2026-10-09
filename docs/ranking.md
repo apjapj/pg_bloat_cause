@@ -180,19 +180,26 @@ session opened after the updates.
 against NULL must not fall through to "the holder binds": that would make every never-cleaned table
 look held back by whichever session happens to be open, which is the same trap pg_lock_tree's alert
 state fell into when a wait recorded on every sample made "has it grown" permanently true. So the rule
-for this case is explicit: **no vacuum, no binding verdict.** The finding says what is known and stops:
+for this case is explicit: **no vacuum, no binding verdict.** The finding says what is known and stops.
+Measured in s10, where the session opened before the updates:
 
-```
-s10_orders: 100,000 dead rows (47.07%, measured). Cause not established: this table has never been
-vacuumed, so it cannot be told whether session bloat_scen_s10 (idle in transaction for 4 min) is
-holding these rows back. Run VACUUM (VERBOSE) on it: "dead but not yet removable" above zero means the
-session binds.
-```
+> s10_orders: [100,000](../scenarios/evidence/s10_never_vacuumed_holder_before.pg18.txt) dead rows ([47.07%](../scenarios/evidence/s10_never_vacuumed_holder_before.pg18.txt), measured). Cause not established: this
+> table has never been vacuumed, so it cannot be told whether session bloat_scen_s10 is holding these
+> rows back. Run VACUUM (VERBOSE) on it: "dead but not yet removable" above zero means the session binds.
 
-Here the holder is reported as present, not as the cause, and the next step offered is the one that
-settles it: a VACUUM, whose "dead but not yet removable" count is the binding test the extension cannot
-run itself. Other causes the table has (autovacuum disabled, thresholds) are still reported as usual,
-since they need no vacuum history to establish. The figures in this sentence are illustrative.
-Fixtures needed: one never-vacuumed table with a holder opened **before** its updates (binding, but
-unprovable without a vacuum) and one with a holder opened **after** (not binding), so the finding can be
-shown to say the same honest thing for both rather than guessing right in one.
+The holder is reported as present, not as the cause, and the next step offered is the one that settles
+it: a VACUUM, whose "dead but not yet removable" count is the binding test the extension cannot run
+itself, since it does not write to the database. Other causes the table has (autovacuum disabled,
+thresholds) are still reported as usual, since they need no vacuum history to establish.
+
+**Tested both ways, and the rule survived.** s10 opens the session before the updates and s11 opens it
+after; both tables have never been vacuumed.
+
+- **Without a vacuum the two cannot be told apart, so the rule is right not to guess.** Both read
+  "never vacuumed", both have the session present, and `pgstattuple` measures the same
+  [100,000](../scenarios/evidence/s11_never_vacuumed_holder_after.pg18.txt) dead rows ([47.07%](../scenarios/evidence/s11_never_vacuumed_holder_after.pg18.txt)) in s11 as in s10. A rule that named the session as
+  the cause would have been right in s10 and wrong in s11, with the same evidence.
+- **Following the instruction settles it.** In s10, VACUUM (VERBOSE) removed [0](../scenarios/evidence/s10_never_vacuumed_holder_before.pg18.txt) and left
+  [100,000](../scenarios/evidence/s10_never_vacuumed_holder_before.pg18.txt) dead but not yet removable: the session binds. In s11 it removed all
+  [100,000](../scenarios/evidence/s11_never_vacuumed_holder_after.pg18.txt): opened after the updates committed, the session's snapshot already sees them as
+  dead, so it binds nothing.

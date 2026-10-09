@@ -12,7 +12,7 @@
 out="$HERE/out"; mkdir -p "$out"
 evidence=${EVIDENCE_DIR:-"$HERE/evidence"}; mkdir -p "$evidence"
 major=$((VER / 10000))
-for s in "$HERE"/s[0-9]_*.sh; do
+for s in "$HERE"/s[0-9]_*.sh "$HERE"/s[0-9][0-9]_*.sh; do
     name=$(basename "$s" .sh)
     "$HERE/teardown.sh" >/dev/null
     bash "$s" > "$out/$name.pg$major.txt" 2>&1

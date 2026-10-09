@@ -1,0 +1,25 @@
+
+part 1: what can be established without a vacuum
+
+the usual hand-written query (pg_stat_user_tables)
+ relname | n_live_tup | n_dead_tup | dead_pct | last_autovacuum | last_vacuum
+ s10_orders | 100000 | 100000 | 50.0 | |
+(1 row)
+
+
+measured (pgstattuple)
+ s10_orders: 100000 live rows, 100000 dead rows, 47.07% of the table is dead tuples
+ never vacuumed: true
+ holder present: bloat_scen_s10, idle in transaction
+ finding: cause not established; the table has never been vacuumed, so it cannot be told
+ whether session bloat_scen_s10 is holding these rows back. Run VACUUM (VERBOSE) on it.
+
+part 2: the finding's instruction, followed
+
+VACUUM (VERBOSE) s10_orders
+ tuples: 0 removed, 200000 remain, 100000 are dead but not yet removable
+ removable cutoff: <XID>, which was <XIDAGE> XIDs old when operation ended
+
+expected cause
+ part 1 cannot tell. Part 2 shows the holder binds: VACUUM removes nothing, every dead row is
+ not yet removable. Opened before the updates, its xid is older than every dead row.
