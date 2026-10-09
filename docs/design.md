@@ -83,7 +83,9 @@ min_standby_xid_gap)` takes it as an argument, and the scenarios pass two second
   that as a holder, so every table in one s8 run reported a standby as present. The primary cannot see
   when a standby's query began and this version keeps no history, so it cannot tell lag from a held
   query; the gap (`min_standby_xid_gap`, default 1000) is a heuristic and says so in its comment. s3,
-  whose standby query pins only a few xids, passes 1.
+  whose standby query pins only a few xids, passes 1. The default is a documented guess and too low
+  for a busy primary: at a few hundred xids a second, one 10-second feedback interval is several
+  thousand xids of ordinary lag, so expect to raise it there, to two or three intervals' worth.
 - **A role that cannot see sessions is told so.** Found by testing the grants: without
   `pg_read_all_stats`, a session holding the horizon is invisible and the finding silently became the
   next cause down. Every row now carries a "not established" note for such a role, so the gap in what

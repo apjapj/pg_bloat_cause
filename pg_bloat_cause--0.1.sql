@@ -105,6 +105,16 @@ BEGIN
        -- extension keeps no history to see the xmin not moving. So the gap is a heuristic, in xids, and
        -- it is a parameter. Found by the scenario suite, where an idle standby's lag made every table in
        -- one s8 run report a standby as present.
+       --
+       -- The default of 1000 is a documented guess, not a tuned value, and it is too LOW for a busy
+       -- primary: at a few hundred xids a second, one feedback interval (10 s) is several thousand xids
+       -- of ordinary lag, so an idle standby on such a cluster can still trip it. Expect to raise it on
+       -- busy primaries, to roughly the xids assigned in two or three feedback intervals. The scenario
+       -- clusters are quiet, which is why 1000 held there.
+       --
+       -- The ::text::xid round trip is load-bearing: pg_snapshot_xmin() returns xid8 and age() takes
+       -- xid, and there is no direct cast between the two. Through text keeps the low 32 bits, which is
+       -- what age() needs.
        AND age(sl.xmin) - age(pg_snapshot_xmin(pg_current_snapshot())::text::xid) >= $2
   ),
   oldest AS (
