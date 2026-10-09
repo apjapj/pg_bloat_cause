@@ -117,8 +117,10 @@ Specific things to get right:
   report them separately.
 - **Age of the cause**, from `xact_start`, slot state, or `pg_prepared_xacts.prepared`, because
   "for 3 days" is the half of the sentence that drives action.
-- **Standbys.** A primary cannot see what a standby's long query is; it sees `backend_xmin` on the
-  walsender. Say "held back by standby `<application_name>`", and say the fix is on the standby.
+- **Standbys.** A primary cannot see what a standby's long query is. With a physical slot it sees the
+  standby's horizon on the slot's `xmin`, not on `pg_stat_replication.backend_xmin`, which is NULL
+  ([s3](scenarios/evidence/s3_standby_feedback.pg18.txt)). Say "held back by standby
+  `<application_name>`", and say the fix is on the standby.
 - **Not a cause**: a table that is bloated from one past event and is now being vacuumed normally.
   Dead space that VACUUM has already reclaimed into the free space map is not "dead rows". Do not
   raise it.
