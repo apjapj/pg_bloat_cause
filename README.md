@@ -2,7 +2,7 @@
 
 **What's slowing down.** Bloat is a symptom; this tool names the cause.
 
-Part of [pg_incident_watch](../pg_incident_watch/). Pure SQL, `CREATE EXTENSION pg_bloat_cause`, no
+Part of [pg_incident_watch](https://github.com/apjapj/pg_incident_watch). Pure SQL, `CREATE EXTENSION pg_bloat_cause`, no
 restart, no `shared_preload_libraries`. Status on 2026-10-08: design only, nothing built. Source:
 `pg_incident_watch-overview.md.pdf`, Draft v0.1.
 
@@ -55,7 +55,7 @@ In order. Steps 1 to 3 settle what the tool says; 4 onwards build it.
 ### 1. Wait for, or write, the shared contract
 
 Payload keys, `event` vocabulary, channel naming, version floor and naming conventions are decided
-once in [pg_incident_watch](../pg_incident_watch/README.md#next-steps). Do not invent local
+once in [pg_incident_watch](https://github.com/apjapj/pg_incident_watch#next-steps). Do not invent local
 versions. The recommended floor is PG 15.
 
 ### 2. Build the scenario fixtures first
