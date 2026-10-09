@@ -13,17 +13,22 @@ the operator to work out why VACUUM is not keeping up. pg_bloat_cause answers th
 ranked worst first, in one sentence:
 
 ```
-orders: 40% dead rows, held back by a logical slot for 3 days
+orders: 40% dead rows, held back by session 4127 (idle in transaction) for 3 days
 ```
+
+An earlier version of this example blamed a logical replication slot. That was wrong, and
+`scenarios/s2_logical_slot.sh` shows it: a logical slot holds back catalog rows (`catalog_xmin`), not
+an ordinary table's. With an inactive slot in place, VACUUM removed all 100,000 dead rows of the user
+table and could not remove 6,000 in `pg_attribute`.
 
 ### The causes it ranks
 
 | Cause | What it means | Where the evidence is |
 |---|---|---|
-| **Something holding back VACUUM** | The xmin horizon is pinned, so dead rows cannot be removed however often VACUUM runs | `pg_stat_activity.backend_xmin` / `backend_xid` (long transaction), `pg_replication_slots.xmin` / `catalog_xmin` (slot), `pg_stat_replication.backend_xmin` (standby with `hot_standby_feedback`), `pg_prepared_xacts` (orphaned prepared transaction) |
-| **Autovacuum falling behind or off** | VACUUM could clean up but is not running often enough, or at all, for this table | `pg_stat_user_tables` (`n_dead_tup`, `last_autovacuum`, `autovacuum_count`, `n_mod_since_analyze`), `reloptions` (`autovacuum_enabled=false`, per-table thresholds), the computed trigger threshold, `pg_stat_progress_vacuum` |
-| **Autovacuum stuck behind a lock** | A worker is waiting on this table | `pg_stat_activity` where `backend_type = 'autovacuum worker'` and `wait_event_type = 'Lock'`, with the full chain from pg_lock_tree when it is installed |
-| **Updates that cannot stay on the page** | Non-HOT updates, because an indexed column changes or the page has no room (`fillfactor`) | `n_tup_upd` vs `n_tup_hot_upd`; on PG 16+ `n_tup_newpage_upd` separates "no room" from "indexed column" |
+| **Something holding back VACUUM** | The xmin horizon is pinned, so dead rows cannot be removed however often VACUUM runs | `pg_stat_activity.backend_xmin` / `backend_xid` (long transaction), `pg_replication_slots.xmin` (physical slot fed by a standby; a logical slot's `catalog_xmin` holds back catalog tables only), `pg_stat_replication.backend_xmin` (standby with `hot_standby_feedback`), `pg_prepared_xacts` (orphaned prepared transaction) |
+| **Autovacuum falling behind or off** | VACUUM could clean up but is not running often enough, or at all, for this table | `pg_stat_user_tables` (`n_dead_tup`, `last_autovacuum`, `autovacuum_count`, `n_mod_since_analyze`, `n_ins_since_vacuum`), `reloptions` (`autovacuum_enabled=false`, per-table thresholds), BOTH computed trigger thresholds (dead-row and, since 13, insert-based: either one firing cleans the table), `pg_stat_progress_vacuum` |
+| **Autovacuum kept off the table by a lock** | An ordinary autovacuum does **not** wait for a lock: it skips the table and tries again next naptime, so nothing shows in `pg_stat_activity`. Only an anti-wraparound autovacuum waits, visibly | For the ordinary case: a stale `last_autovacuum` with dead rows over the threshold, and a session holding a conflicting lock in `pg_locks` (the server log says `skipping vacuum ... lock not available` when `log_autovacuum_min_duration >= 0`). For the anti-wraparound case: `backend_type = 'autovacuum worker'` with `wait_event_type = 'Lock'`. pg_lock_tree, when installed, names the holder |
+| **Updates that cannot stay on the page** | Non-HOT updates, because an indexed column changes or the page has no room (`fillfactor`) | `n_tup_upd` vs `n_tup_hot_upd`; on PG 16+ `n_tup_newpage_upd` counts updates that moved to a new page, which is evidence for "no room" (see the scenarios for how cleanly); on 14 and 15 the finding says it cannot tell the two apart |
 
 ### What a finding looks like
 
@@ -56,7 +61,9 @@ In order. Steps 1 to 3 settle what the tool says; 4 onwards build it.
 
 Payload keys, `event` vocabulary, channel naming, version floor and naming conventions are decided
 once in [pg_incident_watch](https://github.com/apjapj/pg_incident_watch#next-steps). Do not invent local
-versions. The recommended floor is PG 15.
+versions. The floor is **PostgreSQL 14 and later**. PostgreSQL 14 reaches upstream end of life on 2026-11-12, and the floor is revisited then. Features newer
+than 14 are per-feature checks with a stated degradation, never a floor: on 14 and 15 there is no
+`n_tup_newpage_upd`, so the HOT-update finding reports what it cannot tell apart instead of guessing.
 
 ### 2. Build the scenario fixtures first
 
@@ -68,13 +75,18 @@ there, so every later step has something to be right about. At least:
 3. physical standby with `hot_standby_feedback = on` and a long query on the standby
 4. orphaned prepared transaction (needs `max_prepared_transactions > 0`, skip where absent)
 5. `autovacuum_enabled = false` on one table
-6. autovacuum thresholds too high for a hot table
-7. autovacuum worker waiting on a lock held by a long `ALTER TABLE` or open `LOCK TABLE`
+6. autovacuum thresholds too high for a hot table (both the dead-row and the insert threshold)
+7. autovacuum kept off a table by a lock held by an open `LOCK TABLE`: skipped when ordinary,
+   waiting when anti-wraparound
 8. non-HOT updates from an indexed column, and separately from `fillfactor = 100` on a wide row
 9. two causes at once, to pin down ranking
 
 Each scenario should also print what the usual hand-written query reports, so the README can show
 the difference rather than claim it.
+
+**Done, in [`scenarios/`](scenarios/README.md).** Eight of the nine run on PostgreSQL 14 and 18; the
+standby scenario is skipped for want of a second server. Three of them corrected this document: the
+logical-slot example above, the lock row in the causes table, and the threshold row.
 
 ### 3. Define the ranking
 
@@ -134,7 +146,8 @@ shared PG matrix. Tests run with and without pgstattuple and pg_lock_tree.
   separate concern?
 - TOAST tables bloat independently and are vacuumed with their parent. Report them as their own rows,
   or folded into the parent?
-- `n_dead_tup` is an estimate that resets on a stats reset and, before PG 15, on a crash. How much of
+- `n_dead_tup` is an estimate that resets on a stats reset and after crash recovery, on every
+  version (PG 15 moved the statistics into shared memory but still discards them on recovery). How much of
   the "40%" can rest on it when pgstattuple is absent?
 - Should the estimate path be visibly marked (`measured` vs `estimated`) in every row? Recommended
   yes, so nobody acts on an estimate thinking it is a measurement.
