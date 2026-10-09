@@ -12,6 +12,13 @@
 # Step 6 is the strictest and the one most likely to find a runner-specific difference: two
 # consecutive local runs agree byte for byte, but a slower or busier machine may move a timing that
 # the fixtures have not yet been made to wait for. If it fails, the diff is the finding.
+#
+# BC_EVIDENCE_STRICT controls only step 6. Unset or 1 (the default, and what to use locally): a
+# difference fails the job. 0: the full diff is printed with an "EVIDENCE DIFFERS (report-only)" line
+# and the job does not fail on it. The workflow sets 0 for the first runs on hosted runners, because
+# the committed evidence was made on one machine and a comparison that is red for environmental
+# reasons on day one teaches everyone to ignore red. Tighten it to 1 once those runs have been read:
+# see ci/README.md. pgTAP and the scenario assertions are fatal in both modes.
 set -uo pipefail
 v=${1:?usage: ci/job.sh <postgres major version>}
 cd "$(dirname "$0")/.."
@@ -40,11 +47,17 @@ printf '%s\n' "$out"
 if grep -qE 'FAILED' <<<"$out"; then fail=1; fi
 
 step "evidence matches what is committed"
-if git diff --exit-code --stat -- "scenarios/evidence/*.pg$v.txt"; then
+if git diff --quiet -- "scenarios/evidence/*.pg$v.txt"; then
     echo "  identical"
 else
-    git diff -- "scenarios/evidence/*.pg$v.txt" | head -60
-    fail=1
+    git diff --stat -- "scenarios/evidence/*.pg$v.txt"
+    git diff -- "scenarios/evidence/*.pg$v.txt"
+    if [ "${BC_EVIDENCE_STRICT:-1}" = 0 ]; then
+        echo "EVIDENCE DIFFERS (report-only): the diff above is not failing this job, because BC_EVIDENCE_STRICT=0"
+    else
+        echo "EVIDENCE DIFFERS: failing, because BC_EVIDENCE_STRICT is not 0"
+        fail=1
+    fi
 fi
 
 exit $fail
