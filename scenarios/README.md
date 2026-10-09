@@ -22,6 +22,19 @@ burns 110,000 transaction ids. They need a superuser, `pgstattuple`, `max_prepar
 for s4, and `wal_level = logical` for s2. Set `BC_CONTAINER` to the server's Docker container name
 and s7 also reads its log.
 
+**Starting a throwaway server for them.** Pass the settings as `postgres -c` arguments to `docker run`,
+which is how the runs below were made:
+
+```bash
+docker run -d --rm --name bc-scen-14 -p 127.0.0.1:5614:5432 -e POSTGRES_PASSWORD=test pg-dev-infra-pg14 \
+  postgres -c wal_level=logical -c max_prepared_transactions=10 \
+           -c log_autovacuum_min_duration=0 -c autovacuum_naptime=10s
+```
+
+The two obvious alternatives both fail with these images: `ALTER SYSTEM` followed by `pg_ctl
+restart`, and editing `postgresql.conf` then signalling the postmaster. The image's entrypoint exits
+when the server stops, so the container goes with it and the change never takes effect.
+
 ## What each one proves
 
 | Scenario | Builds | What it shows | Runs on |
