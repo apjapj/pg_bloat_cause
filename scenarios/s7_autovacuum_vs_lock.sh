@@ -13,6 +13,14 @@
 # stopping cleanup is the lock.
 . "$(dirname "$0")/lib.sh"
 SINCE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+# Byte offset into the server log, taken before anything is created, for the case where there is no
+# BC_CONTAINER to `docker logs`. `docker logs --since` filters by time, which needs no offset, but a
+# log FILE has to be cut somewhere and a line count would include every skip this container ever
+# logged, including those of an earlier scenario. A byte offset is exact and needs no clock
+# comparison. Empty when there is no readable file, and then the count below is empty too.
+LOGFILE=$(psql -X -At -c "SHOW log_destination" >/dev/null 2>&1 && \
+          ls -1 /var/log/postgresql/postgresql-*-main.log 2>/dev/null | head -1)
+[ -n "${LOGFILE:-}" ] && LOGOFF=$(wc -c < "$LOGFILE") || LOGOFF=""
 setup_schema
 # autovacuum_freeze_max_age is set here, at creation, and not in part 2: changing a reloption takes the
 # same SHARE UPDATE EXCLUSIVE lock the holder has, so the first draft blocked on its own holder.
@@ -31,13 +39,24 @@ psql -X -P pager=off -c "
 SELECT pid, backend_type, wait_event_type, wait_event, left(query, 70) AS query
   FROM pg_stat_activity WHERE backend_type = 'autovacuum worker'"
 say "evidence, part 1: the server log, if this is one of the scenario containers"
+# Two ways to reach it, because the two CI platforms hold the log in different places. BC_CONTAINER
+# names the scenario container and `docker logs --since` reads it, which is how ci/job.sh runs it. On
+# the Forgejo runner there is no container to name and the server is a local Debian cluster whose log
+# is a file, so the file is read from the byte offset taken above. Both must print the SAME line, or
+# the one committed evidence file per version cannot match on both platforms.
 if [ -n "${BC_CONTAINER:-}" ]; then
     # The exact count depends on where the 40 s wait falls against the naptime (4 in one run, 5 in the
     # next), so the evidence records the fact that cannot move: at least three skips.
     skips=$(docker logs --since "$SINCE" "$BC_CONTAINER" 2>&1 | grep -c 'skipping vacuum of "s7_orders" --- lock not available')
+elif [ -n "${LOGOFF:-}" ]; then
+    skips=$(tail -c "+$((LOGOFF + 1))" "$LOGFILE" | grep -c 'skipping vacuum of "s7_orders" --- lock not available')
+else
+    skips=0
+fi
+if [ -n "${BC_CONTAINER:-}" ] || [ -n "${LOGOFF:-}" ]; then
     note "autovacuum logged \"skipping vacuum of s7_orders --- lock not available\" at least 3 times in 40 s: $([ "$skips" -ge 3 ] && echo true || echo "false ($skips)")"
 else
-    note "BC_CONTAINER not set, log not read"
+    note "BC_CONTAINER not set and no readable server log, log not read"
 fi
 
 finding s7_orders

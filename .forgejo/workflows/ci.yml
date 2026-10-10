@@ -1,0 +1,140 @@
+# .forgejo/workflows/ci.yml: the Forgejo half of CI. GitHub runs .github/workflows/ci.yml; both cover
+# the same ground on the same two PostgreSQL versions, and both are expected green before a release.
+# They are separate files because they cannot be the same file: the two platforms have different
+# runners and no shared runner label.
+#
+# WHY THIS EXISTS. This repository previously had no Forgejo workflow, and its .github workflow was
+# the only CI. On Forgejo that workflow ran and failed on every single push: it asks for
+# `runs-on: ubuntu-latest`, which on this instance resolves to a self-hosted act_runner whose job
+# container has no /var/run/docker.sock, and ci/job.sh builds its image and starts a primary and a
+# standby with `docker build`, `docker run` and `docker network create`. Every job needing a server
+# died on "failed to connect to the docker API" while `lint`, needing no server, passed. Four runs,
+# four failures, unnoticed, because this repository also had no scripts/check-ci.sh, so nothing ever
+# read the Forgejo result.
+#
+# WHY babar-pg AND NOT A services: CONTAINER. pg_lock_tree's main workflow takes PostgreSQL as a
+# `services:` container and loads the release SQL directly. That does not work here: scenarios
+# create the extension with CREATE EXTENSION and scenarios/install-extension.sh puts the .control and
+# .sql files into the server's filesystem with `docker cp` and `docker exec`, and a service container
+# cannot be modified from the job container without a Docker socket. The extension has to be installed
+# into the server that runs the tests, so the server has to be inside the job.
+#
+# The babar-pg labels run apjapj/pg-runner, which bakes a full PostgreSQL stack plus pgTAP,
+# postgresql-server-dev and make, and ships a `pg-start` helper. `make install` writes into that
+# server's own filesystem and CREATE EXTENSION finds it.
+#
+#   babar-pg     PostgreSQL 18   (pg-runner:18-YYYYMMDD)
+#   babar-pg14   PostgreSQL 14   (pg-runner:14-YYYYMMDD)
+#
+# THE STANDBY. s3 needs a hot standby, so this is not pg_limit_runway's shape: it is two clusters on
+# one host, built by scenarios/standby-local.sh, the Docker-free counterpart of scenarios/standby.sh.
+# The names are pinned to bc_standby_<major> and the slot to standby_s3, because s3's committed
+# evidence quotes both and a differently named cluster would show up as an evidence diff that is not
+# a defect. s3 skips itself when there is no standby, and a skip is a silent hole in the suite, so
+# standby-local.sh asserts the standby is in recovery with hot_standby_feedback on and the primary's
+# walsender carries the expected name before the suite starts.
+#
+# Two jobs rather than a matrix, because the two versions need DIFFERENT RUNNER LABELS and a matrix
+# would have to interpolate `runs-on: ${{ matrix.pool }}`, not exercised anywhere else on this
+# instance. The pool runs at capacity 1, so these queue and run in turn.
+name: ci
+on:
+  push:
+  pull_request:
+jobs:
+  lint:
+    # The `docker` label, not babar-pg: this job needs no PostgreSQL at all. check-evidence.sh reads
+    # the committed evidence and the figures the docs cite, and `bash -n` parses every script.
+    runs-on: docker
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scenarios/check-evidence.sh
+      - run: for s in scenarios/*.sh ci/*.sh; do bash -n "$s" || exit 1; done
+
+  scenarios-14:
+    name: scenarios (14)
+    runs-on: babar-pg14
+    env: &job-env
+      PGUSER: postgres
+      PGDATABASE: postgres
+      PGHOST: 127.0.0.1
+      PGPORT: "5432"
+      BC_STANDBY_PORT: "5433"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start Postgres and the standby
+        run: |
+          set -euo pipefail
+          pg-start
+          ./scenarios/standby-local.sh 14 up
+      - name: Install the extension on the primary
+        run: |
+          set -euo pipefail
+          make install
+          psql -qX -v ON_ERROR_STOP=1 -c "CREATE EXTENSION pg_bloat_cause"
+          # Assert, do not print. A bare SELECT reports whatever is installed and is then discarded,
+          # so a partial or stale `make install` would pass unnoticed: the point of installing here
+          # is to test THIS working tree, not whatever the image happened to carry.
+          want=$(sed -n "s/^default_version *= *'\(.*\)'/\1/p" pg_bloat_cause.control)
+          got=$(psql -X -tAc "SELECT extversion FROM pg_extension WHERE extname = 'pg_bloat_cause'")
+          echo "control says ${want}, server loaded ${got}"
+          [ -n "$want" ] && [ "$got" = "$want" ] || {
+            echo "the loaded version is not this checkout" >&2; exit 1; }
+      - name: pgTAP
+        run: pg_prove --dbname postgres test/*.sql
+      - name: Scenarios
+        run: |
+          set -uo pipefail
+          out=$(./scenarios/run.sh); rc=$?
+          printf '%s\n' "$out"
+          printf '%s\n' "$out" | grep -q 'FAILED' && exit 1
+          exit $rc
+      - name: Evidence
+        run: |
+          set -uo pipefail
+          if git diff --quiet -- "scenarios/evidence/*.pg14.txt"; then
+            echo "  evidence identical"
+          else
+            git diff -- "scenarios/evidence/*.pg14.txt"
+            echo "EVIDENCE DIFFERS"; exit 1
+          fi
+
+  scenarios-18:
+    name: scenarios (18)
+    runs-on: babar-pg
+    env: *job-env
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start Postgres and the standby
+        run: |
+          set -euo pipefail
+          pg-start
+          ./scenarios/standby-local.sh 18 up
+      - name: Install the extension on the primary
+        run: |
+          set -euo pipefail
+          make install
+          psql -qX -v ON_ERROR_STOP=1 -c "CREATE EXTENSION pg_bloat_cause"
+          want=$(sed -n "s/^default_version *= *'\(.*\)'/\1/p" pg_bloat_cause.control)
+          got=$(psql -X -tAc "SELECT extversion FROM pg_extension WHERE extname = 'pg_bloat_cause'")
+          echo "control says ${want}, server loaded ${got}"
+          [ -n "$want" ] && [ "$got" = "$want" ] || {
+            echo "the loaded version is not this checkout" >&2; exit 1; }
+      - name: pgTAP
+        run: pg_prove --dbname postgres test/*.sql
+      - name: Scenarios
+        run: |
+          set -uo pipefail
+          out=$(./scenarios/run.sh); rc=$?
+          printf '%s\n' "$out"
+          printf '%s\n' "$out" | grep -q 'FAILED' && exit 1
+          exit $rc
+      - name: Evidence
+        run: |
+          set -uo pipefail
+          if git diff --quiet -- "scenarios/evidence/*.pg18.txt"; then
+            echo "  evidence identical"
+          else
+            git diff -- "scenarios/evidence/*.pg18.txt"
+            echo "EVIDENCE DIFFERS"; exit 1
+          fi
