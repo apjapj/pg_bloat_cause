@@ -42,7 +42,7 @@ files=$(ls -1 .forgejo/workflows/*.yml .forgejo/workflows/*.yaml \
 
 # One argument per file, newline separated, so a filename with a space cannot split into two.
 CHECK_FILES=$(printf '%s\n' "$files") python3 - <<'PY'
-import os, sys
+import os, re, sys
 
 try:
     import yaml
@@ -99,6 +99,29 @@ for path in os.environ["CHECK_FILES"].splitlines():
         print("  FAIL  %s has no jobs: it would dispatch nothing" % path)
         failed = True
         continue
+
+    # Every "./something" a run step names must exist in the tree. A path typo in a workflow is not a
+    # syntax error and not a YAML problem, so nothing else here would ever see it: `make lint` runs
+    # this script by its own path from the Makefile and never reads what the workflow invokes. That
+    # is not hypothetical. A commit pointed a GitHub job at ./scenarios/check-workflows.sh when the
+    # script was in ./scripts/, `make lint` passed locally, the Forgejo copy of the same job passed
+    # because it had the right path, and only the real GitHub run failed.
+    missing = []
+    for job_name, job in (doc["jobs"] or {}).items():
+        for step in (job or {}).get("steps") or []:
+            if not isinstance(step, dict):
+                continue
+            for token in re.findall(r"(?<![\w./-])\./[\w./-]+", step.get("run") or ""):
+                token = token.rstrip(";")
+                if not os.path.exists(token):
+                    missing.append("job %s: %s" % (job_name, token))
+    if missing:
+        print("  FAIL  %s" % path)
+        for m in missing:
+            print("        run step names a path that does not exist: %s" % m)
+        failed = True
+        continue
+
     print("  ok    %s  (%d jobs)" % (path, len(doc["jobs"])))
 
 sys.exit(1 if failed else 0)
