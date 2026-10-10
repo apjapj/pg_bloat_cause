@@ -15,5 +15,8 @@ prove:
 # Every figure the documentation links to scenario evidence must be in that file. No database.
 lint:
 	./scenarios/check-evidence.sh
+	# Rejects a duplicated mapping key, which PyYAML accepts silently and Forgejo does not.
+	# A workflow with one dispatches no jobs at all and its run reads as a plain failure.
+	./scripts/check-workflows.sh
 
 .PHONY: install prove lint

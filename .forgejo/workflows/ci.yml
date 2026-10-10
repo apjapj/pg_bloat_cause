@@ -48,8 +48,22 @@ jobs:
     runs-on: docker
     steps:
       - uses: actions/checkout@v4
+      - name: Parse the workflow files, refusing a duplicated key
+        run: |
+          # node:20-bookworm carries python3 but not PyYAML, and a plain `yaml.safe_load` accepts a
+          # duplicate key silently and keeps the last one. That is how a duplicated env block shipped
+          # here and this workflow dispatched no jobs at all, while every check said it was fine.
+          #
+          # This is the one job here that reaches the network, and that is a real cost: pg_lock_tree's
+          # lint job is deliberately apt-free so a gate does not depend on the Debian mirror at job
+          # time. It is paid here because the alternative is a check that cannot run, and a check that
+          # cannot run is the failure scripts/check-workflows.sh exists to prevent. If the mirror ever
+          # becomes unreliable the fix is a PyYAML-bearing runner image, not removing the check.
+          apt-get update -q
+          apt-get install -y -q --no-install-recommends python3-yaml
+          ./scripts/check-workflows.sh
       - run: ./scenarios/check-evidence.sh
-      - run: for s in scenarios/*.sh ci/*.sh; do bash -n "$s" || exit 1; done
+      - run: for s in scenarios/*.sh ci/*.sh scripts/*.sh; do bash -n "$s" || exit 1; done
 
   scenarios-14:
     name: scenarios (14)

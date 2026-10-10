@@ -16,10 +16,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: no workflow file has a duplicated key
+        # A plain `yaml.safe_load` accepts a duplicate key silently and keeps the last one, which is
+        # how a duplicated env block shipped and Forgejo then refused to dispatch the workflow at all
+        # while every other check reported it fine. See scripts/check-workflows.sh.
+        run: ./scripts/check-workflows.sh
       - name: every linked figure is in its evidence file
         run: ./scenarios/check-evidence.sh
       - name: every script parses
-        run: for s in scenarios/*.sh ci/*.sh; do bash -n "$s" || exit 1; done
+        run: for s in scenarios/*.sh ci/*.sh scripts/*.sh; do bash -n "$s" || exit 1; done
 
   test:
     runs-on: ubuntu-latest
