@@ -13,14 +13,13 @@ is supported and released tags are not edited.
 
 **Do not open a public issue.** There are two ways to report privately, and either is fine.
 
-**By e-mail: linux.postgres+pg_bloat_cause@gmail.com.** This works today, while the repository is
-private.
+**By e-mail: linux.postgres+pg_bloat_cause@gmail.com.** This works today, and it keeps working: the
+address does not depend on anything about this repository.
 
 **By GitHub:** the **Report a vulnerability** button, on this repository's Security tab, under
 Advisories. A report there is a private advisory that only you and the maintainers can see, and you
-are credited on it. **It is not available until the repository is public.** GitHub offers private
-vulnerability reporting on public repositories only, and its API answers 404 on a private repository,
-so until then the e-mail above is the channel that works and this one is not yet there.
+are credited on it. GitHub offers this on public repositories only, so it appears here once this
+repository is public; the e-mail above is the channel that works either way.
 
 Either way, please include the pg_bloat_cause version (`SELECT extversion FROM pg_extension WHERE extname =
 'pg_bloat_cause'`), the PostgreSQL major version, the roles the statements ran as and their grants, and the
