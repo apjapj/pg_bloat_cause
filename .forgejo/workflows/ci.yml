@@ -60,11 +60,6 @@ jobs:
       PGHOST: 127.0.0.1
       PGPORT: "5432"
       BC_STANDBY_PORT: "5433"
-      PGUSER: postgres
-      PGDATABASE: postgres
-      PGHOST: 127.0.0.1
-      PGPORT: "5432"
-      BC_STANDBY_PORT: "5433"
     steps:
       - uses: actions/checkout@v4
       - name: Start Postgres and the standby
