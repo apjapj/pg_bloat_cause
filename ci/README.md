@@ -5,19 +5,19 @@ pg_prove by running the same command. `.github/workflows/ci.yml` runs it for Pos
 GitHub-hosted runners, plus a lint job that needs no database. The server image is `ci/Dockerfile`: the
 official `postgres` image, which ships `pgstattuple`, plus pgTAP.
 
-## The evidence comparison is report-only, for now, and must be tightened
+## The evidence comparison is strict
 
-The job's last step compares the masked scenario evidence it produces with what is committed. Two
-consecutive runs here are byte-identical, on two different image builds, but the committed files were
-all made on one machine, and a hosted runner has a different host, a different `psql`, and a slower or
-busier clock. A comparison that is red for environmental reasons on its first day teaches everyone to
-ignore red runs, which is the failure this project was burned by in pg_lock_tree 1.1.9 and 1.1.11.
+The job's last step compares the masked scenario evidence it produces with what is committed, and a
+difference fails the job.
 
-So the workflow sets `BC_EVIDENCE_STRICT=0`: a difference prints the full diff and the line
-`EVIDENCE DIFFERS (report-only)`, and does not fail the job. Everything else, pgTAP and every scenario
-assertion about the extension's finding, fails the job as usual. Locally the default is strict.
+It started report-only. The committed files were all made on one machine, a hosted runner has a
+different host, a different `psql` and a different clock, and a comparison that is red for environmental
+reasons on its first day teaches everyone to ignore red runs, which is what pg_lock_tree shipped past in
+1.1.9 and 1.1.11. The first GitHub run, 38059460144 on `5302a8e`, settled it: on a GitHub-hosted runner
+(image 20261002.596) with Ubuntu's psql 16 client against PostgreSQL 14 and 18 servers, both test jobs
+reported the evidence `identical`. That is a third environment after two local image builds, so the
+workflow is now strict.
 
-**To do after the first GitHub runs:** read the evidence step of each. If it says `identical`, remove the
-`BC_EVIDENCE_STRICT: "0"` line from the workflow. If it shows a diff, decide whether it is a regression
-or the environment, fix the fixture or the mask for the latter, and then remove the line. It is not
-meant to stay.
+**Report-only is still there for diagnosis.** `BC_EVIDENCE_STRICT=0 ./ci/job.sh <major>` prints the full
+diff with the line `EVIDENCE DIFFERS (report-only)` and does not fail on it; unset or 1 fails. Use it to
+see a difference without stopping at it, never to make a red run green.
