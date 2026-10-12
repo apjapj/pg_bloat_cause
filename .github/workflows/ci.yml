@@ -21,6 +21,9 @@ jobs:
         # how a duplicated env block shipped and Forgejo then refused to dispatch the workflow at all
         # while every other check reported it fine. See scripts/check-workflows.sh.
         run: ./scripts/check-workflows.sh
+      - name: the version agrees across control, the newest release and the README header
+        # The check that would have caught a README still calling a built 0.1 "design only".
+        run: ./scripts/lint-docs.sh
       - name: every linked figure is in its evidence file
         run: ./scenarios/check-evidence.sh
       - name: every script parses

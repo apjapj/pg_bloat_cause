@@ -62,6 +62,7 @@ jobs:
           apt-get update -q
           apt-get install -y -q --no-install-recommends python3-yaml
           ./scripts/check-workflows.sh
+      - run: ./scripts/lint-docs.sh
       - run: ./scenarios/check-evidence.sh
       - run: for s in scenarios/*.sh ci/*.sh scripts/*.sh; do bash -n "$s" || exit 1; done
 
