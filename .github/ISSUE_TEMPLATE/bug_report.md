@@ -1,3 +1,13 @@
+---
+name: Bug report
+about: Something here does not do what the documentation says it does
+title: ''
+labels: ''
+# `labels` is empty because no labels have been created on GitHub for this repository
+# yet. Name them here once they exist and GitHub applies them on creation. Checked
+# 2026-10-12: without this front matter GitHub did not register the file as a template
+# at all, so the chooser offered nothing but a blank issue.
+---
 # Bug report
 
 <!--
