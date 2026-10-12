@@ -108,6 +108,30 @@ if [ -n "$ext" ] && [ -f Makefile ]; then
              [ -f "$f" ] || printf '%s ' "$f"; done)
   [ -z "$missing" ] && ok "every name in DATA has a file on disk behind it" \
     || bad "DATA lists files that do not exist: $missing"
+
+  # scenarios/install-extension.sh copies the extension into a scenario container with an EXPLICIT
+  # file list, never a glob, and an md5 check per file. A version bump adds files to DATA and the
+  # glob in DATA picks them up, but the explicit list does not: the container ends up without the
+  # new release script, CREATE EXTENSION finds no file for the new default_version, and the
+  # scenario's finding comes out "pg_limit_runway is not installed on this server". That is exactly
+  # what 0.2.1 did to the GitHub scenario job on 2026-10-12, while Forgejo stayed green because its
+  # scenario job installs via make install (all of DATA). This check is the fix for the class, not
+  # the one instance: every release and update script, and the control file, must be named in the
+  # FILES list. No-ops when the repo has no such script.
+  if [ -f scenarios/install-extension.sh ]; then
+      files_line=$(grep -m1 '^FILES=' scenarios/install-extension.sh)
+      missing_ie=""
+      for f in "${ext}".control "${ext}"--*.sql; do
+          [ -e "$f" ] || continue
+          b=$(basename "$f")
+          grep -q "$b" <<<"$files_line" || missing_ie="$missing_ie $b"
+      done
+      if [ -z "$missing_ie" ]; then
+          ok "every release, update and control file is named in scenarios/install-extension.sh"
+      else
+          bad "these are on disk and in DATA but NOT in scenarios/install-extension.sh's FILES list, so a scenario container would not get them:$missing_ie"
+      fi
+  fi
 fi
 
 # A path or link in a doc is relative to that doc, not the repo root. Glob and shell
