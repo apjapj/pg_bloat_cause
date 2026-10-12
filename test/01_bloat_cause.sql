@@ -66,6 +66,43 @@ SELECT ok((SELECT t LIKE 'bc_test_orders: % dead rows (%, estimated), autovacuum
 SELECT is((SELECT count(*) FROM bloat_cause), (SELECT count(*) FROM bloat_cause_findings()),
           'the view returns what bloat_cause_findings() returns with its defaults');
 
+-- Privileges. Closed by default: a role with no grant is refused by the view and by both functions.
+-- A role given the documented grants, but not pg_read_all_stats, can read the findings and is TOLD
+-- what it cannot see. That is the behaviour docs/design.md promises, asserted as a real role rather
+-- than as a superuser, since a superuser can never observe it.
+--
+-- These run BEFORE the VACUUM below, on the same fixture the assertions above already proved visible
+-- in pg_stat_user_tables. On PG 14 the statistics collector writes asynchronously, so a
+-- freshly-created fixture can have an unobservable dead-tuple count for a moment; reusing the
+-- already-proven fixture removes that wait entirely. This was a real flake: 2 failures in 9 CI runs on
+-- the 14 runner, none on 15 and later, where statistics are in shared memory.
+\o /dev/null
+DROP ROLE IF EXISTS bc_test_none;
+DROP ROLE IF EXISTS bc_test_granted;
+CREATE ROLE bc_test_none;
+CREATE ROLE bc_test_granted;
+GRANT SELECT ON bloat_cause TO bc_test_granted;
+GRANT EXECUTE ON FUNCTION bloat_cause_findings(interval, bigint), bloat_cause_text(interval, bigint) TO bc_test_granted;
+\o
+
+SET ROLE bc_test_none;
+SELECT throws_ok('SELECT count(*) FROM bloat_cause', '42501', NULL,
+                 'a role with no grant is refused by the view');
+SELECT throws_ok('SELECT count(*) FROM bloat_cause_text()', '42501', NULL,
+                 'and by bloat_cause_text(), which is not executable by PUBLIC');
+RESET ROLE;
+
+SET ROLE bc_test_granted;
+SELECT ok((SELECT unknowns[1] LIKE 'this role cannot see other users'' sessions (it lacks pg_read_all_stats)%'
+             FROM bloat_cause WHERE relname = 'bc_test_orders'),
+         'a role with the grants but without pg_read_all_stats reads the view and is told what it cannot see');
+SELECT ok((SELECT t LIKE '%Not established: this role cannot see other users'' sessions%'
+             FROM bloat_cause_text() t WHERE t LIKE 'bc_test_orders:%'),
+         'and the sentence form says it too');
+SELECT is((SELECT cause FROM bloat_cause WHERE relname = 'bc_test_orders'), 'autovacuum disabled',
+         'while still naming the cause it can establish');
+RESET ROLE;
+
 -- Once vacuumed, the table has nothing to say: no dead rows, no row. On a primary with a feedback
 -- standby the VACUUM has to wait until the standby has reported a horizon past the updates, or it
 -- cannot remove the newest dead rows yet (wal_receiver_status_interval, 10 s by default); the scenario
@@ -105,45 +142,6 @@ END;
 
 -- The age rendering the sentences use.
 SELECT is(bloat_cause_age(interval '3 days 4 hours'), '3 days', 'ages of two days or more are in days');
-
--- Privileges. Closed by default: a role with no grant is refused by the view and by both functions.
--- A role given the documented grants, but not pg_read_all_stats, can read the findings and is TOLD
--- what it cannot see. That is the behaviour docs/design.md promises, asserted as a real role rather
--- than as a superuser, since a superuser can never observe it. Needs a fixture table with dead rows,
--- so it reuses one built the same way as above.
-\o /dev/null
-DROP TABLE bc_test_orders;
-CREATE TABLE bc_test_orders (id int PRIMARY KEY, status text) WITH (autovacuum_enabled = false);
-INSERT INTO bc_test_orders SELECT g, 'new' FROM generate_series(1, 1000) g;
-ANALYZE bc_test_orders;
-UPDATE bc_test_orders SET status = 'paid' WHERE id % 2 = 0;
-DROP ROLE IF EXISTS bc_test_none;
-DROP ROLE IF EXISTS bc_test_granted;
-CREATE ROLE bc_test_none;
-CREATE ROLE bc_test_granted;
-GRANT SELECT ON bloat_cause TO bc_test_granted;
-GRANT EXECUTE ON FUNCTION bloat_cause_findings(interval, bigint), bloat_cause_text(interval, bigint) TO bc_test_granted;
-\o
-SELECT pg_sleep(1.5);
-SELECT pg_stat_clear_snapshot();
-
-SET ROLE bc_test_none;
-SELECT throws_ok('SELECT count(*) FROM bloat_cause', '42501', NULL,
-                 'a role with no grant is refused by the view');
-SELECT throws_ok('SELECT count(*) FROM bloat_cause_text()', '42501', NULL,
-                 'and by bloat_cause_text(), which is not executable by PUBLIC');
-RESET ROLE;
-
-SET ROLE bc_test_granted;
-SELECT ok((SELECT unknowns[1] LIKE 'this role cannot see other users'' sessions (it lacks pg_read_all_stats)%'
-             FROM bloat_cause WHERE relname = 'bc_test_orders'),
-          'a role with the grants but without pg_read_all_stats reads the view and is told what it cannot see');
-SELECT ok((SELECT t LIKE '%Not established: this role cannot see other users'' sessions%'
-             FROM bloat_cause_text() t WHERE t LIKE 'bc_test_orders:%'),
-          'and the sentence form says it too');
-SELECT is((SELECT cause FROM bloat_cause WHERE relname = 'bc_test_orders'), 'autovacuum disabled',
-          'while still naming the cause it can establish');
-RESET ROLE;
 
 \o /dev/null
 DROP TABLE bc_test_orders;
