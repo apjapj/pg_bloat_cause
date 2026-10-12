@@ -1,12 +1,17 @@
 # ranking: which cause comes first, and what happens to the others
 
-**For: whoever writes `bloat_cause` and `bloat_cause_text()`, and whoever has to argue with a
+**For: whoever maintains `bloat_cause` and `bloat_cause_text()`, and whoever has to argue with a
 finding.** pg_bloat_cause reports one sentence per table, worst first. This document is the rule that
 decides which cause the sentence names when more than one is true, and how the others are reported.
-It is settled here, before any SQL, so the code has one thing to be right about. Every figure links to
-the scenario evidence it comes from; `scenarios/check-evidence.sh` fails if one does not. The sample
-sentences in code blocks show the wording: their counts are the scenarios' own, linked in the text next
-to each, and their durations ("for 4 min") are illustrative.
+It was settled before any SQL, and `bloat_cause` and `bloat_cause_text()` have shipped since, as
+0.1. The rule still binds: a change to either function is a change to what this document promises,
+and this is the document to change with it. `bloat_cause_command()` is named below and has **not**
+shipped; it is README step 5, so read those sentences as the shape the command will take, not as
+behaviour you can run today.
+
+Every figure links to the scenario evidence it comes from; `scenarios/check-evidence.sh` fails if one
+does not. The sample sentences in code blocks show the wording: their counts are the scenarios' own,
+linked in the text next to each, and their durations ("for 4 min") are illustrative.
 
 ## The rule in one line
 

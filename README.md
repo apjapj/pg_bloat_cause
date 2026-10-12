@@ -1,5 +1,8 @@
 # pg_bloat_cause
 
+[![CI](https://github.com/apjapj/pg_bloat_cause/actions/workflows/ci.yml/badge.svg)](https://github.com/apjapj/pg_bloat_cause/actions/workflows/ci.yml)
+[![Licence: PostgreSQL](https://img.shields.io/badge/licence-PostgreSQL-blue.svg)](LICENSE)
+
 **What's slowing down.** Bloat is a symptom; this tool names the cause.
 
 Part of [pg_incident_watch](https://github.com/apjapj/pg_incident_watch). Pure SQL, `CREATE EXTENSION pg_bloat_cause`, no
