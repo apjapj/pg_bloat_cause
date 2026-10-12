@@ -3,8 +3,8 @@
 **What's slowing down.** Bloat is a symptom; this tool names the cause.
 
 Part of [pg_incident_watch](https://github.com/apjapj/pg_incident_watch). Pure SQL, `CREATE EXTENSION pg_bloat_cause`, no
-restart, no `shared_preload_libraries`. Status: **0.1**, built and tested on PostgreSQL 14 and 18, not
-yet tagged. Install and grants: [INSTALL.md](INSTALL.md).
+restart, no `shared_preload_libraries`. Status: **0.1**, tagged `v0.1.0`, built and tested on
+PostgreSQL 14 and 18. Install and grants: [INSTALL.md](INSTALL.md).
 
 ## Overview
 
