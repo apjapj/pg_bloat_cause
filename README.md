@@ -106,7 +106,7 @@ there; then a lock wait; then autovacuum off or behind; then HOT efficiency, whi
 finding rather than an incident. Within a cause, rank by dead bytes, not dead-row share, so a small
 table at 90% does not outrank a large one at 40%.
 
-### 4. ~~The first version: diagnose only~~ **Built: 0.1, not yet released**
+### 4. ~~The first version: diagnose only~~ **Done: 0.1, tagged `v0.1.0`, [INSTALL.md](INSTALL.md)**
 
 `pg_bloat_cause--0.1.sql`: the view `bloat_cause`, `bloat_cause_findings()` behind it, and
 `bloat_cause_text()`. Every scenario asserts the finding this view gives for its table, on PostgreSQL 14
