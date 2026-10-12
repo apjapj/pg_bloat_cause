@@ -183,6 +183,39 @@ for f in $DOCS_ALL; do
   done
 done
 
+# A count written in prose is a claim like any other, and this one was wrong in three places at
+# once: CONTRIBUTING.md, the umbrella's README, and the v0.1.0 release body all said 13
+# scenarios. The number came from `ls scenarios/s*.sh | wc -l`, which is 13 because the glob
+# also matches standby.sh and standby-local.sh. Those are helpers, not scenarios: run.sh
+# selects s[0-9]_*.sh and s[0-9][0-9]_*.sh, which is 11, and scenarios/evidence/ holds 22
+# files, which is 11 scenarios times two PostgreSQL versions. The count below is taken the
+# same way run.sh takes it, so a helper added later cannot quietly change what a document says.
+step "every scenario count in prose is the count run.sh will actually run"
+if [ -d scenarios ]; then
+  scen_count=$(ls scenarios/s[0-9]*_*.sh 2>/dev/null | wc -l | tr -d ' ')
+  # Reported per file and per line, because a bare list of wrong numbers is not enough to act on.
+  # grep -n prefixes the LINE NUMBER, not the claimed number, so the number is taken from the
+  # matched text itself: the first integer on the line that is followed by "scenarios".
+  scen_bad=""
+  for f in $DOCS_ALL; do
+    [ -f "$f" ] || continue
+    while IFS= read -r hit; do
+      [ -n "$hit" ] || continue
+      ln=${hit%%:*}
+      claim_n=$(printf '%s\n' "$hit" | grep -oE '[0-9]+ scenarios' | grep -oE '^[0-9]+' | head -1)
+      [ -n "$claim_n" ] || continue
+      [ "$claim_n" = "$scen_count" ] || scen_bad="$scen_bad $f:$ln($claim_n)"
+    done < <(grep -nE '\b[0-9]+ scenarios\b' "$f" 2>/dev/null)
+  done
+  if [ -z "$scen_bad" ]; then
+    ok "every scenario count in prose is $scen_count, which is what run.sh selects"
+  else
+    bad "run.sh selects $scen_count scenarios, but the docs claim a different number at:$scen_bad (counting 'ls scenarios/s*.sh' also matches the standby helpers, which is how 13 got here)"
+  fi
+else
+  ok "no scenarios/ directory, so there is no scenario count to check"
+fi
+
 step "house style"
 # No em-dashes or en-dashes in any document. The house rule, and the one a reader's eye
 # catches before anything else.
