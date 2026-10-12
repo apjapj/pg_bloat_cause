@@ -26,6 +26,13 @@
 #   babar-pg     PostgreSQL 18   (pg-runner:18-YYYYMMDD)
 #   babar-pg14   PostgreSQL 14   (pg-runner:14-YYYYMMDD)
 #
+# The `babar-pg` names are self-hosted RUNNER LABELS on the author's own Forgejo, and the name is
+# derived from the runner host. They are load-bearing: `runs-on:` must match the label the runner
+# advertises, so renaming one here without renaming it on the runner turns every scenario job red
+# with "no runner matching the labels". They are kept deliberately in this file (this is the Forgejo
+# copy; the GitHub copy runs on ubuntu-latest and never reads them). Do not "tidy" the name out on
+# the assumption it is a leftover host: it is the only thing that selects the runner.
+#
 # THE STANDBY. s3 needs a hot standby, so this is not pg_limit_runway's shape: it is two clusters on
 # one host, built by scenarios/standby-local.sh, the Docker-free counterpart of scenarios/standby.sh.
 # The names are pinned to bc_standby_<major> and the slot to standby_s3, because s3's committed
