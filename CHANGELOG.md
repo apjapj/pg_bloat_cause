@@ -15,8 +15,15 @@ evidence file is byte-identical to 0.1, and the scenario suite fails if one move
   get a pid out of an English sentence without parsing it.
 - A logical replication slot is deliberately absent: it holds `catalog_xmin`, which
   protects catalog rows rather than user tables, and `s2` asserts that.
-- `bloat_cause_findings()` still keeps its own inline copy of the holder logic in this
-  release. Switching it to the shared function is a separate change.
+- `bloat_cause_findings()` now reads `bloat_cause_holder()` instead of keeping its own
+  copy of the holder logic, so the holder is defined once and used everywhere. No
+  sentence and no evidence file changes: the three columns the sentences use are
+  selected from the shared function, and the scenario suite fails if one moves.
+- `bloat_cause_holder()` is executable by `PUBLIC`, which is a change of mind from
+  the first draft of this release. `bloat_cause_findings()` is SECURITY INVOKER, so
+  revoking the holder from `PUBLIC` would break the two-line grant in
+  [INSTALL.md](INSTALL.md) for any role following it. `EXECUTE` is not visibility: a
+  role without `pg_read_all_stats` still cannot read the sessions the holder reports.
 - Graded the way the other two functions are: not executable by `PUBLIC`.
 
 ## 0.1 (2026-10-12)

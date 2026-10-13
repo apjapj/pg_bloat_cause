@@ -74,52 +74,21 @@ BEGIN
   RETURN QUERY EXECUTE format($q$
   WITH
   -- Every horizon holder in the cluster, with the time it started where that is visible.
-  holders AS (
-    SELECT 'session' AS kind,
-           format('session %%s (%%s, %%s)', a.pid, coalesce(nullif(a.application_name, ''), 'no application_name'), a.state) AS who,
-           a.xact_start AS since,
-           age(coalesce(a.backend_xid, a.backend_xmin)) AS xid_age
-      FROM pg_stat_activity a
-     WHERE a.pid <> pg_backend_pid()
-       AND a.backend_type = 'client backend'
-       AND (a.backend_xid IS NOT NULL OR a.backend_xmin IS NOT NULL)
-       AND a.xact_start < statement_timestamp() - $1
-    UNION ALL
-    SELECT 'prepared', format('prepared transaction %%L', p.gid), p.prepared, age(p.transaction)
-      FROM pg_prepared_xacts p
-     WHERE p.prepared < statement_timestamp() - $1
-    UNION ALL
-    -- A standby's feedback through its physical slot. The primary cannot see when the standby's
-    -- query began, so "since" is NULL; s3 measured that the walsender's backend_xmin is NULL here
-    -- and the slot's xmin is where the horizon is.
-    SELECT 'standby',
-           format('standby %%s through slot %%s', coalesce(r.application_name, 'unknown'), sl.slot_name),
-           NULL::timestamptz, age(sl.xmin)
-      FROM pg_replication_slots sl
-      LEFT JOIN pg_stat_replication r ON r.pid = sl.active_pid
-     WHERE sl.slot_type = 'physical' AND sl.xmin IS NOT NULL
-       -- Only when the standby holds back further than anything on the primary itself, by at least
-       -- min_standby_xid_gap xids. An idle standby's slot always has an xmin, and between its feedback
-       -- messages (wal_receiver_status_interval, 10 s by default) that xmin LAGS the primary's own
-       -- horizon by however many xids were assigned meanwhile. The primary cannot tell that lag from a
-       -- query holding the standby's xmin still: it never sees when the standby's query began, and this
-       -- extension keeps no history to see the xmin not moving. So the gap is a heuristic, in xids, and
-       -- it is a parameter. Found by the scenario suite, where an idle standby's lag made every table in
-       -- one s8 run report a standby as present.
-       --
-       -- The default of 1000 is a documented guess, not a tuned value, and it is too LOW for a busy
-       -- primary: at a few hundred xids a second, one feedback interval (10 s) is several thousand xids
-       -- of ordinary lag, so an idle standby on such a cluster can still trip it. Expect to raise it on
-       -- busy primaries, to roughly the xids assigned in two or three feedback intervals. The scenario
-       -- clusters are quiet, which is why 1000 held there.
-       --
-       -- The ::text::xid round trip is load-bearing: pg_snapshot_xmin() returns xid8 and age() takes
-       -- xid, and there is no direct cast between the two. Through text keeps the low 32 bits, which is
-       -- what age() needs.
-       AND age(sl.xmin) - age(pg_snapshot_xmin(pg_current_snapshot())::text::xid) >= $2
-  ),
+  -- The horizon holder, by asking bloat_cause_holder() rather than repeating the query. 0.1 through
+  -- 0.2 kept this inline, and two copies of "what is holding the horizon back" is how they drift
+  -- apart: one gets a fix and the other does not, and the sentences and the command disagree about
+  -- which process is the blocker. bloat_cause_holder() is the single answer, and this is its first
+  -- reader, so from 0.2 the holder is defined once and used everywhere.
+  --
+  -- Only the three columns the sentences use are taken: kind, who, since. The function returns more
+  -- (pid, gid, slot_name, xid_age) because bloat_cause_command() needs the ones a statement needs,
+  -- and none of those change what a sentence says, which is why every evidence file in this
+  -- repository is byte-identical across this change. xid_age is still needed, to order.
   oldest AS (
-    SELECT * FROM holders ORDER BY xid_age DESC NULLS LAST LIMIT 1
+    SELECT kind, who, since
+      FROM @extschema@.bloat_cause_holder($1, $2)
+     ORDER BY xid_age DESC NULLS LAST
+     LIMIT 1
   ),
   t AS (
     SELECT s.schemaname, s.relname, s.relid, s.n_dead_tup, s.n_live_tup, s.n_ins_since_vacuum,
@@ -401,4 +370,22 @@ COMMENT ON FUNCTION @extschema@.bloat_cause_holder(interval, bigint) IS
 
 REVOKE EXECUTE ON FUNCTION @extschema@.bloat_cause_findings(interval, bigint) FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION @extschema@.bloat_cause_text(interval, bigint) FROM PUBLIC;
-REVOKE EXECUTE ON FUNCTION @extschema@.bloat_cause_holder(interval, bigint) FROM PUBLIC;
+-- bloat_cause_holder() is deliberately left executable by PUBLIC, which is a change of mind from the
+-- first draft of 0.2 and is worth stating plainly. It was revoked there, on the reasoning that it
+-- reads pg_stat_activity and pg_prepared_xacts. But 0.2 also makes bloat_cause_findings() call it,
+-- and findings() is SECURITY INVOKER: PostgreSQL checks a function called from another function against
+-- the CALLING role, not against the owner. Revoking the holder therefore breaks the grant INSTALL.md
+-- tells people to use, and it breaks it at the first call rather than at install.
+--
+-- The reasoning that led to the revoke does not survive contact with the ownership model, because it
+-- was never about the function: it is about what the calling role may read. A role without
+-- pg_read_all_stats cannot see other users' backend_xmin and xact_start however it may execute this,
+-- so it gets the same hidden rows and the same "not established" note it got from findings() in 0.1.
+-- Measured on PostgreSQL 18 with one holder and one unprivileged role: with the grant in place
+-- findings() returns the same rows it always did, and the role still cannot read the sessions
+-- findings() is hiding. EXECUTE is not visibility.
+--
+-- SECURITY DEFINER was the other answer and is the wrong one here: it would run the holder's catalog
+-- reads as the owner, so an unprivileged role calling findings() would see sessions it is not entitled
+-- to. Measured the same way, a SECURITY DEFINER probe returned 1 session to a role that a plain SELECT
+-- returned 0 for. That is a privilege escalation, so findings() stays INVOKER and so does this.

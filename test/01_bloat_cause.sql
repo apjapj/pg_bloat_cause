@@ -11,7 +11,7 @@ SET client_min_messages = warning;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 CREATE EXTENSION IF NOT EXISTS pg_bloat_cause;
 \o
-SELECT plan(27);
+SELECT plan(30);
 
 SELECT has_view('bloat_cause', 'the bloat_cause view exists');
 SELECT has_function('bloat_cause_findings', ARRAY['interval', 'bigint'], 'bloat_cause_findings(interval, bigint) exists');
@@ -101,6 +101,18 @@ SELECT ok((SELECT t LIKE '%Not established: this role cannot see other users'' s
          'and the sentence form says it too');
 SELECT is((SELECT cause FROM bloat_cause WHERE relname = 'bc_test_orders'), 'autovacuum disabled',
          'while still naming the cause it can establish');
+-- bc_test_granted holds exactly the two lines INSTALL.md tells people to run, and nothing else. 0.2
+-- makes findings() call bloat_cause_holder() as this role, so if the holder were revoked from PUBLIC
+-- this call raises 42501. It did, when the first draft revoked it, and neither pgTAP nor any scenario
+-- caught that: every one of them runs as the owner. These are the guard, and they exist because the
+-- failure is invisible until an unprivileged role calls it.
+SELECT lives_ok($$SELECT count(*) FROM bloat_cause_findings()$$,
+                'findings() runs for a role holding only the documented grant');
+SELECT lives_ok($$SELECT count(*) FROM bloat_cause$$,
+                'and through the view, which checks findings() as the role using the view');
+SELECT is((SELECT unknowns[1] LIKE 'this role cannot see other users'' sessions (it lacks pg_read_all_stats)%'
+           FROM bloat_cause WHERE relname = 'bc_test_orders'), true,
+          'and being able to execute the holder still does not let it see other users sessions');
 RESET ROLE;
 
 -- Once vacuumed, the table has nothing to say: no dead rows, no row. On a primary with a feedback
@@ -174,10 +186,14 @@ SELECT is(bloat_cause_age(interval '3 days 4 hours'), '3 days', 'ages of two day
              WHERE p.proname = 'bloat_cause_holder' AND t.n = p.pronargs + 3),
             'text',
             'gid is text, because a prepared transaction has no pid');
-  SELECT ok((SELECT bool_and(has_function_privilege('public', c.oid, 'EXECUTE') IS FALSE)
+  -- This asserts PUBLIC CAN execute bloat_cause_holder(), the opposite of what the first draft of
+  -- 0.2 did and the opposite of what its own test asserted. It is deliberate: findings() calls the
+  -- holder and is SECURITY INVOKER, so revoking the holder from PUBLIC breaks the documented grant.
+  -- EXECUTE is not visibility, and the granted-role block above proves that.
+  SELECT ok((SELECT bool_and(has_function_privilege('public', c.oid, 'EXECUTE'))
              FROM pg_proc c JOIN pg_namespace n ON n.oid = c.pronamespace
             WHERE n.nspname = 'public' AND c.proname = 'bloat_cause_holder'),
-            'bloat_cause_holder is not executable by PUBLIC');
+            'bloat_cause_holder is executable by PUBLIC, because findings() calls it as the caller');
 \o /dev/null
 DROP TABLE bc_test_orders;
 REVOKE ALL ON bloat_cause FROM bc_test_granted;

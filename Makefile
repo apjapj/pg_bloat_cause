@@ -22,5 +22,8 @@ lint:
 	# Rejects a duplicated mapping key, which PyYAML accepts silently and Forgejo does not.
 	# A workflow with one dispatches no jobs at all and its run reads as a plain failure.
 	./scripts/check-workflows.sh
+	# Every function in the newest release script is called by a test. The first version of
+	# bloat_cause_holder() shipped broken and every gate here was green, because nothing ran it.
+	./scripts/check-new-function.sh
 
 .PHONY: install prove lint
