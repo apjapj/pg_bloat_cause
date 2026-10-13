@@ -3,6 +3,22 @@
 Versions are listed newest first. Released tags are never edited: a change that needs
 a new entry gets a new version.
 
+## 0.2 (unreleased)
+
+The holder, in structured form. No existing output changes: every sentence and every
+evidence file is byte-identical to 0.1, and the scenario suite fails if one moves.
+
+- `bloat_cause_holder(age, gap)` returns every horizon holder as a row: `kind`, `pid`,
+  `gid`, `slot_name`, `application_name`, `state`, `who`, `since`, `xid_age`. It exists
+  for `bloat_cause_command()`, which has to emit a statement naming a pid or a gid. In
+  0.1 the holder was named only in `cause_detail`, which is prose, and a caller cannot
+  get a pid out of an English sentence without parsing it.
+- A logical replication slot is deliberately absent: it holds `catalog_xmin`, which
+  protects catalog rows rather than user tables, and `s2` asserts that.
+- `bloat_cause_findings()` still keeps its own inline copy of the holder logic in this
+  release. Switching it to the shared function is a separate change.
+- Graded the way the other two functions are: not executable by `PUBLIC`.
+
 ## 0.1 (2026-10-12)
 
 The first release. Current state only: it reads the live catalogs, keeps no history,
