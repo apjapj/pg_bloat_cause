@@ -11,7 +11,7 @@ SET client_min_messages = warning;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 CREATE EXTENSION IF NOT EXISTS pg_bloat_cause;
 \o
-SELECT plan(19);
+SELECT plan(27);
 
 SELECT has_view('bloat_cause', 'the bloat_cause view exists');
 SELECT has_function('bloat_cause_findings', ARRAY['interval', 'bigint'], 'bloat_cause_findings(interval, bigint) exists');
@@ -143,6 +143,41 @@ END;
 -- The age rendering the sentences use.
 SELECT is(bloat_cause_age(interval '3 days 4 hours'), '3 days', 'ages of two days or more are in days');
 
+  -- bloat_cause_holder(), added in 0.2. These tests exist because the function's first version
+  -- shipped broken and nothing in this repository noticed: pgTAP did not call it, no scenario
+  -- called it, and the evidence diff cannot see a function that returns no rows here. Every new
+  -- function gets at least one test that calls it, in the same commit that adds it.
+  SELECT has_function('bloat_cause_holder', ARRAY['interval', 'bigint'],
+                     'bloat_cause_holder(interval, bigint) exists');
+  SELECT is((SELECT count(*)::int FROM bloat_cause_holder()),
+            (SELECT count(*)::int FROM bloat_cause_holder(interval '1 minute', 1000)),
+            'bloat_cause_holder() defaults to the arguments the sentences use');
+  SELECT lives_ok($$SELECT * FROM bloat_cause_holder()$$,
+                  'bloat_cause_holder() runs without raising');
+  SELECT lives_ok($$SELECT * FROM bloat_cause_holder(interval '1 second', 0)$$,
+                  'bloat_cause_holder() runs with the most permissive arguments');
+  -- col_type_is() needs a table; bloat_cause_holder() is a RETURNS TABLE function, so its column
+  -- types are read from pg_proc instead. xid_age is the one that matters: age() returns integer,
+  -- and declaring the column an interval is a runtime error, not a warning.
+  SELECT is((SELECT format_type(t.oid, NULL)
+              FROM pg_proc p, unnest(p.proallargtypes) WITH ORDINALITY AS t(oid, n)
+             WHERE p.proname = 'bloat_cause_holder' AND t.n = p.pronargs + 9),
+            'integer',
+            'xid_age is integer because age() returns integer');
+  SELECT is((SELECT format_type(t.oid, NULL)
+              FROM pg_proc p, unnest(p.proallargtypes) WITH ORDINALITY AS t(oid, n)
+             WHERE p.proname = 'bloat_cause_holder' AND t.n = p.pronargs + 2),
+            'integer',
+            'pid is integer, so a caller can compare it with pg_stat_activity.pid');
+  SELECT is((SELECT format_type(t.oid, NULL)
+              FROM pg_proc p, unnest(p.proallargtypes) WITH ORDINALITY AS t(oid, n)
+             WHERE p.proname = 'bloat_cause_holder' AND t.n = p.pronargs + 3),
+            'text',
+            'gid is text, because a prepared transaction has no pid');
+  SELECT ok((SELECT bool_and(has_function_privilege('public', c.oid, 'EXECUTE') IS FALSE)
+             FROM pg_proc c JOIN pg_namespace n ON n.oid = c.pronamespace
+            WHERE n.nspname = 'public' AND c.proname = 'bloat_cause_holder'),
+            'bloat_cause_holder is not executable by PUBLIC');
 \o /dev/null
 DROP TABLE bc_test_orders;
 REVOKE ALL ON bloat_cause FROM bc_test_granted;
