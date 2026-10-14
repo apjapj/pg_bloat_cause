@@ -3,7 +3,7 @@
 Versions are listed newest first. Released tags are never edited: a change that needs
 a new entry gets a new version.
 
-## 0.2 (unreleased)
+## 0.2 (2026-10-14)
 
 The holder, in structured form. No existing output changes: every sentence and every
 evidence file is byte-identical to 0.1, and the scenario suite fails if one moves.
