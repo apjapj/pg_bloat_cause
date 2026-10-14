@@ -1,0 +1,9 @@
+# Catalogs a README feature table names on purpose without the release script reading them.
+#
+# One identifier per line, followed by why. This file is the part that rots, so it is reviewed: an
+# entry here is a claim that naming the catalog is correct even though the SQL never touches it.
+#
+# pg_lock_tree is named in the lock feature row to say the opposite of a dependency: the holder is
+# named from pg_locks directly, and pg_lock_tree is not consulted. Removing the name would remove the
+# correction, so the row keeps it and the entry below is the record.
+pg_lock_tree  named to say this extension does NOT depend on it; the holder comes from pg_locks

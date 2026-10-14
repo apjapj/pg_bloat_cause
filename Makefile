@@ -25,5 +25,8 @@ lint:
 	# Every function in the newest release script is called by a test. The first version of
 	# bloat_cause_holder() shipped broken and every gate here was green, because nothing ran it.
 	./scripts/check-new-function.sh
+	# Every catalog a README feature table names is one the release script reads. Six wrong
+	# claims of that kind were found by hand in one afternoon, and a manual pass is forgotten.
+	./scripts/check-evidence-claims.sh
 
 .PHONY: install prove lint

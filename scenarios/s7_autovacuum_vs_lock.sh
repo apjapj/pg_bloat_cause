@@ -69,9 +69,16 @@ BEGIN FOR i IN 1..n LOOP PERFORM txid_current(); COMMIT; END LOOP; END \$\$" -c 
 note "age(relfrozenxid) is at least 110,000 xids, over the table's autovacuum_freeze_max_age of 100,000: $(val "SELECT age(relfrozenxid) >= 110000 FROM pg_class WHERE oid = '$SCHEMA.s7_orders'::regclass")"
 sleep $((naptime * 3))
 say "evidence, part 2: autovacuum workers now"
+# Filtered to the worker acting on THIS table, and that filter is load-bearing. The bare
+# backend_type = 'autovacuum worker' returned every worker in the cluster, so any other one existing
+# at that moment added a row to the evidence and failed the job. It did, in CI: a second row appeared
+# as "613 | | |", with a raw pid and no wait event, and the run went red while the assertion it exists
+# to make was passing. A scenario about one table's lock should show the worker on that table.
 psql -X -P pager=off -c "
 SELECT pid, wait_event_type, wait_event, left(query, 80) AS query
-  FROM pg_stat_activity WHERE backend_type = 'autovacuum worker'"
+  FROM pg_stat_activity
+ WHERE backend_type = 'autovacuum worker'
+   AND query LIKE '%s7_orders%'"
 finding s7_orders
 assert_finding s7_orders 'lock blocks anti-wraparound vacuum' '' '' '%anti-wraparound autovacuum is waiting%bloat_scen_s7%'
 expected "part 1: autovacuum skipped s7_orders because session bloat_scen_s7 holds a conflicting
