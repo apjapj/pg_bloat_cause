@@ -389,3 +389,136 @@ REVOKE EXECUTE ON FUNCTION @extschema@.bloat_cause_text(interval, bigint) FROM P
 -- reads as the owner, so an unprivileged role calling findings() would see sessions it is not entitled
 -- to. Measured the same way, a SECURITY DEFINER probe returned 1 session to a role that a plain SELECT
 -- returned 0 for. That is a privilege escalation, so findings() stays INVOKER and so does this.
+
+-- bloat_cause_command(): the statement that clears the cause, returned and never run.
+--
+-- Read-only like everything else here. Nothing in this file acts on a cluster, and this is no
+-- exception: it returns text for a human to look at and paste. The \gexec idiom is in the COMMENT
+-- below and is the reader's decision, not this extension's.
+--
+-- Why the cause is the only thing it answers. One table can have several causes at once, and
+-- docs/ranking.md decides which is named first. Clearing the first is what moves the number, so
+-- the command is for the primary cause only, and the secondary causes are deliberately not given
+-- statements. A reader handed four statements for one table would paste all four, and two of them
+-- would then look like the fix while doing nothing about the cause that was actually holding the
+-- rows.
+--
+-- Why each destructive statement carries what it loses. Every row here can end a session, a
+-- prepared transaction or a replication slot. Dropping a replication slot loses that consumer's
+-- position and cannot be undone by recreating it, and terminating an idle-in-transaction session
+-- rolls back whatever it had open. So the cost is in the same row as the statement, not in a
+-- separate note the reader may not read.
+--
+-- The holder comes from bloat_cause_holder(), not from a second copy of the holder query. That is
+-- the whole reason the holder was factored out in 0.2: a statement needs a pid or a gid, and
+-- getting one out of cause_detail would mean parsing an English sentence.
+--
+-- Two cases produce NO row, on purpose, following lock_tree_command()'s precedent:
+--   a standby holder. Its query is on the other host, so this side has no pid to terminate and
+--     no statement that would help. docs/ranking.md rule 3 says the command is for the primary
+--     only. bloat_cause_text() already says where the fix is.
+--   your own pid. An operator must not be handed the means to disconnect themselves mid-query,
+--     and pg_terminate_backend() on your own backend would either do nothing or cancel the very
+--     statement reading this.
+CREATE FUNCTION @extschema@.bloat_cause_command(min_holder_age interval DEFAULT interval '1 minute',
+                                                 min_standby_xid_gap bigint DEFAULT 1000)
+RETURNS TABLE (
+  schemaname name,
+  relname    name,
+  cause      text,
+  command    text,
+  -- What running it costs, in the same row, because the statement alone reads as harmless.
+  loses      text
+)
+LANGUAGE sql STABLE
+AS $$
+  WITH f AS (
+    SELECT * FROM @extschema@.bloat_cause_findings($1, $2)
+  ),
+  -- The oldest holder, the same one findings() joined ON true, so a table's command always names
+  -- the holder its sentence names. Read once here rather than per table because the primary has
+  -- exactly one oldest horizon.
+  h AS (
+    SELECT kind, pid, gid, slot_name, who, since
+      FROM @extschema@.bloat_cause_holder($1, $2)
+     ORDER BY xid_age DESC NULLS LAST
+     LIMIT 1
+  ),
+  -- The blocker of a table that autovacuum cannot get past. findings() names it in the sentence;
+  -- the statement needs the pid, so it is read here. A lock has no age, so unlike the horizon
+  -- holder this is simply whichever session holds the blocking mode.
+  blk AS (
+    SELECT l.relation, min(a.pid) AS pid
+      FROM pg_locks l
+      JOIN pg_stat_activity a ON a.pid = l.pid
+     WHERE l.locktype = 'relation' AND l.granted AND a.pid <> pg_backend_pid()
+       AND a.backend_type = 'client backend'
+       AND l.mode IN ('ShareUpdateExclusiveLock', 'ShareLock', 'ShareRowExclusiveLock',
+                      'ExclusiveLock', 'AccessExclusiveLock')
+     GROUP BY l.relation
+  )
+  SELECT f.schemaname, f.relname, f.cause,
+         CASE f.cause
+           -- The holder. A session is ended by cancelling it, not terminating it: cancelling asks
+           -- it to give up at the next safe point, which is what an idle-in-transaction blocker
+           -- needs, and it leaves a running query to finish. Termination is the harsher tool and is
+           -- not the first thing to hand someone. The prepared transaction has no backend to
+           -- cancel, so it takes ROLLBACK PREPARED, which is the statement that ends it.
+           WHEN 'horizon holder' THEN
+             CASE h.kind
+               WHEN 'session'  THEN format('SELECT pg_cancel_backend(%s);', h.pid)
+               WHEN 'prepared' THEN format('ROLLBACK PREPARED ''%s'';', h.gid)
+             END
+           WHEN 'lock keeps vacuum off' THEN format('SELECT pg_cancel_backend(%s);', b.pid)
+           WHEN 'lock blocks anti-wraparound vacuum' THEN format('SELECT pg_cancel_backend(%s);', b.pid)
+           -- autovacuum disabled, thresholds not reached and behind all end with autovacuum not
+           -- running, and none of them is cleared by a statement a reader should paste blind.
+           -- ALTER TABLE ... RESET (autovacuum_enabled) looks like the fix and will not help if the
+           -- threshold is simply never reached, which is why ranking.md rule 3 withholds it. What
+           -- the reader gets instead is the statement that shows whether autovacuum is even trying.
+           WHEN 'autovacuum disabled' THEN
+             format($cmd$SELECT c.relname,
+       current_setting('autovacuum') AS cluster_autovacuum,
+       coalesce((SELECT option_value FROM pg_options_to_table(c.reloptions)
+                 WHERE option_name = 'autovacuum_enabled'), '(unset, so on)') AS table_autovacuum_enabled
+  FROM pg_class c WHERE c.oid = %L;$cmd$, f.relid)
+           WHEN 'autovacuum thresholds not reached' THEN
+             format('SELECT relname, reloptions FROM pg_class WHERE oid = %L;', f.relid)
+           WHEN 'autovacuum behind' THEN
+             format('VACUUM (VERBOSE) %I.%I;', f.schemaname, f.relname)
+           -- Non-HOT updates are a property of the update pattern, not a setting, and no statement
+           -- fixes it. The reader is shown the numbers so they can see the ratio themselves.
+           WHEN 'updates not HOT' THEN
+             format('SELECT relname, n_tup_upd, n_tup_hot_upd FROM pg_stat_user_tables WHERE relid = %L;', f.relid)
+         END,
+         CASE f.cause
+           WHEN 'horizon holder' THEN
+             CASE h.kind
+               WHEN 'session'  THEN format('cancels the query in session %s; whatever it had open is rolled back, and it is not terminated outright', h.pid)
+               WHEN 'prepared' THEN format('rolls back prepared transaction %s and releases everything it holds', h.gid)
+               ELSE 'nothing to run: the query holding this is on the standby, and the fix is there'
+             END
+           WHEN 'lock keeps vacuum off' THEN
+             format('cancels session %s, which has held the lock autovacuum needs; it is cancelled rather than terminated, so a running query there still finishes', b.pid)
+           WHEN 'lock blocks anti-wraparound vacuum' THEN
+             format('cancels session %s, which is holding an anti-wraparound vacuum off; that vacuum cannot proceed until the lock is gone', b.pid)
+           WHEN 'autovacuum disabled' THEN
+             'reads the setting back; it changes nothing, and no statement is offered because turning autovacuum on is a decision about this table, not a paste'
+           WHEN 'autovacuum thresholds not reached' THEN
+             'reads the table options back; it changes nothing, because the threshold is a property of the update rate and lowering it is a tuning decision'
+           WHEN 'autovacuum behind' THEN
+             'this one does act: it vacuums the table now. It is safe, but it is work on a live table and it is offered because autovacuum simply has not got to it yet'
+           WHEN 'updates not HOT' THEN
+             'reads the update counters back; it changes nothing, because non-HOT updates come from the update pattern and only fewer updates or a fillfactor changes that'
+         END
+    FROM f
+    LEFT JOIN h  ON true
+    LEFT JOIN blk b ON b.relation = f.relid
+   -- No row for a holder this side cannot act on, and never one for the reader's own session.
+   WHERE f.cause IS DISTINCT FROM 'horizon holder'
+      OR (h.kind IS DISTINCT FROM 'standby' AND h.pid IS DISTINCT FROM pg_backend_pid())
+  ORDER BY f.dead_bytes DESC NULLS LAST, f.schemaname, f.relname
+$$;
+
+COMMENT ON FUNCTION @extschema@.bloat_cause_command(interval, bigint) IS
+  'One statement per table, for the primary cause only, returned and never run: see docs/ranking.md rule 3 for why the secondary causes get no statement. Each row carries what running it loses. Destructive cases name a pid or a gid, never parsed out of a sentence: a session is cancelled with pg_cancel_backend() rather than terminated, a prepared transaction is rolled back with ROLLBACK PREPARED, and a standby holder produces NO row because the query is on the other host and no statement on this side would help. Your own session is never returned. Read-only: intended for psql, SELECT * FROM bloat_cause_command();, or paste one row yourself. The autovacuum causes mostly return a read-back rather than an action, deliberately: turning autovacuum on or lowering a threshold is a tuning decision, and ranking.md rule 3 withholds it. Only ''autovacuum behind'' acts, with VACUUM (VERBOSE).';

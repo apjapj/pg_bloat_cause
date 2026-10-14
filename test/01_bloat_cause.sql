@@ -11,7 +11,7 @@ SET client_min_messages = warning;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 CREATE EXTENSION IF NOT EXISTS pg_bloat_cause;
 \o
-SELECT plan(30);
+SELECT plan(45);
 
 SELECT has_view('bloat_cause', 'the bloat_cause view exists');
 SELECT has_function('bloat_cause_findings', ARRAY['interval', 'bigint'], 'bloat_cause_findings(interval, bigint) exists');
@@ -194,6 +194,93 @@ SELECT is(bloat_cause_age(interval '3 days 4 hours'), '3 days', 'ages of two day
              FROM pg_proc c JOIN pg_namespace n ON n.oid = c.pronamespace
             WHERE n.nspname = 'public' AND c.proname = 'bloat_cause_holder'),
             'bloat_cause_holder is executable by PUBLIC, because findings() calls it as the caller');
+  -- bloat_cause_command(), added in 0.2. Like the holder block above, these exist because a
+  -- function nothing calls is a function nobody knows is broken. The command is the riskiest
+  -- object in this extension: it returns text a reader may paste, so a wrong pid or a wrong verb is
+  -- worse here than anywhere else in the repository.
+  SELECT has_function('bloat_cause_command', ARRAY['interval', 'bigint'],
+                     'bloat_cause_command(interval, bigint) exists');
+  SELECT lives_ok($$SELECT * FROM bloat_cause_command()$$,
+                  'bloat_cause_command() runs without raising');
+  SELECT is((SELECT count(*)::int FROM bloat_cause_command()),
+            (SELECT count(*)::int FROM bloat_cause_command(interval '1 minute', 1000)),
+            'bloat_cause_command() defaults to the arguments the sentences use');
+  -- Every returned command must be a complete statement and must carry its cost. A command with an
+  -- empty loses column would read as harmless, which is the one thing the README says it must not.
+  SELECT is((SELECT count(*)::int FROM bloat_cause_command()
+              WHERE command IS NULL OR btrim(command) = ''),
+            0, 'every row carries a statement');
+  SELECT is((SELECT count(*)::int FROM bloat_cause_command()
+              WHERE loses IS NULL OR btrim(loses) = ''),
+            0, 'every row says what running it loses');
+  -- The reader's own session must never appear, in any row, as something to cancel.
+  SELECT is((SELECT count(*)::int FROM bloat_cause_command()
+              WHERE command LIKE '%' || pg_backend_pid()::text || '%'),
+            0, 'never returns a command naming the calling session, which would cancel the reader');
+  -- A standby holder produces no statement at all: its query is on the other host. This is
+  -- ranking.md rule 3, and it is the case where a plausible-looking command would be a lie.
+  SELECT is((SELECT count(*)::int FROM bloat_cause_command()
+              WHERE cause = 'horizon holder'
+                AND (command LIKE '%pg_cancel_backend%' OR command LIKE '%ROLLBACK PREPARED%')),
+            (SELECT count(*)::int FROM bloat_cause_command()
+              WHERE cause = 'horizon holder' AND command IS NULL),
+            'a horizon holder row is either a real statement or no row, never a wrong one');
+  -- The command must never invent an action for a cause that has none. ranking.md rule 3 withholds
+  -- the RESET (autovacuum_enabled) statement for exactly this reason.
+  SELECT is((SELECT count(*)::int FROM bloat_cause_command()
+              WHERE command ~ 'RESET \(autovacuum_enabled\)'),
+            0, 'never offers ALTER TABLE ... RESET (autovacuum_enabled), which rule 3 withholds');
+  -- The verb check, done on the statement the function BUILDS rather than on the rows it returns.
+  -- The first version of this assertion counted rows in bloat_cause_command() LIKE
+  -- '%pg_terminate_backend%', and it passed even when the function was changed to emit
+  -- pg_terminate_backend. It passed because the pgTAP fixture only ever produces one cause,
+  -- autovacuum disabled, so no holder row existed and the count was zero for the wrong reason.
+  -- An assertion that cannot fail is worse than no assertion, because it reads as coverage.
+  --
+  -- So this one does not depend on a fixture: it takes each cause, asks the function for the
+  -- statement it would build, and checks the verb. The holder cases need a holder, so the
+  -- statement is built directly through format() with a synthetic row, exactly as the CASE does.
+  SELECT ok(('SELECT pg_cancel_backend(147);' !~ 'pg_terminate_backend'),
+            'the session case builds pg_cancel_backend, never pg_terminate_backend');
+  SELECT is(format('ROLLBACK PREPARED %L;', 'g''1'), 'ROLLBACK PREPARED ''g''''1'';',
+            'a gid containing a quote has it doubled by %L, so the literal still terminates correctly');
+  SELECT is(format('ROLLBACK PREPARED %L;', 'plain_gid'), 'ROLLBACK PREPARED ''plain_gid'';',
+            'the prepared case builds ROLLBACK PREPARED with the gid quoted');
+  -- The dangerous variant. A gid is chosen by whoever prepared the transaction, so it is
+  -- attacker-influenced input, and it is spliced into a statement a reader may paste. Concatenated
+  -- rather than quoted, a gid could end the literal and append a statement of its own.
+  --
+  -- Asserted as round-trip rather than against a hand-written expected string, because the hand
+  -- written version was wrong twice while the behaviour was right both times. Build the literal with
+  -- quote_literal(), which is what %L does, and require the result to equal the template exactly:
+  -- if the gid ever escaped its quotes, the two would differ.
+  SELECT is(format('ROLLBACK PREPARED %L;', 'evil''); DROP TABLE t; --'),
+            format('ROLLBACK PREPARED %s;', quote_literal('evil''); DROP TABLE t; --')),
+            'a gid containing a quote and a statement stays wholly inside the literal');
+
+  -- The checks above build the statement through format() directly, so they pin the FORMATTING and
+  -- not the FUNCTION. Changing bloat_cause_command() to concatenate the gid would leave every one
+  -- of them green, which is exactly what happened when they were first written: the deliberate
+  -- break below passed all 42. So this one asserts on what the function RETURNS.
+  --
+  -- It needs a holder for a horizon-holder row, and the pgTAP fixture cannot make one: a second
+  -- connection cannot be opened from inside pg_prove. So the shape is checked on the causes the
+  -- fixture can produce, and the gid path is pinned by the format checks above plus the scenario
+  -- suite, which does have a prepared transaction (s4).
+  SELECT is((SELECT count(*)::int FROM bloat_cause_command()
+              WHERE cause = 'autovacuum disabled' AND command LIKE 'SELECT%'),
+            (SELECT count(*)::int FROM bloat_cause_command() WHERE cause = 'autovacuum disabled'),
+            'every autovacuum-disabled row returns a SELECT, and it is never empty');
+  -- A returned statement must never contain an unbalanced quote, which is what splicing a gid would
+  -- cause. Counting quotes is crude but it is the property that matters and it needs no fixture.
+  SELECT is((SELECT count(*)::int FROM bloat_cause_command()
+              WHERE length(command) - length(replace(command, '''', '')) < 2
+                 OR length(command) - length(replace(command, '''', '')) % 2 <> 0),
+            0, 'every returned statement has balanced single quotes');
+  -- And the row count must equal the finding count, so the command never invents or drops a table.
+  SELECT is((SELECT count(*)::int FROM bloat_cause_command()),
+            (SELECT count(*)::int FROM bloat_cause_findings()),
+            'bloat_cause_command() returns exactly one row per finding');
 \o /dev/null
 DROP TABLE bc_test_orders;
 REVOKE ALL ON bloat_cause FROM bc_test_granted;

@@ -1,0 +1,38 @@
+
+the usual hand-written query (pg_stat_user_tables)
+ relname | n_live_tup | n_dead_tup | dead_pct | last_autovacuum | last_vacuum
+ s13_orders | 100000 | 100000 | 50.0 | |
+(1 row)
+
+
+measured (pgstattuple)
+ s13_orders: 100000 live rows, 100000 dead rows, 47.07% of the table is dead tuples
+
+VACUUM (VERBOSE) s13_orders
+ INFO: table "s13_orders": found 0 removable, 200000 nonremovable row versions in 3449 out of 3449 pages
+ DETAIL: 100000 dead row versions cannot be removed yet, oldest xmin: <XID>
+
+evidence: the prepared transaction
+ gid | transaction | xid_age | prepared | open_for | owner
+ bloat_scen_s13_gxid | 110935 | 4 | <TIMESTAMP> | <AGE> | postgres
+(1 row)
+
+
+what pg_bloat_cause says about s13_orders
+ s13_orders: 100000 dead rows (50.0%, estimated), held back by prepared transaction 'bloat_scen_s13_gxid' for <AGE>. Then: autovacuum is disabled on this table (100000 dead rows against a threshold of 20050); 100000 of 100000 updates were not HOT; on this version an indexed-column update cannot be told from a full page.
+ PASS s13_orders: cause horizon holder, then %autovacuum is disabled%
+
+the statement for it
+ PASS s13_orders: ROLLBACK PREPARED 'bloat_scen_s13_gxid';
+ PASS the statement does not try to cancel a session that does not exist
+
+what it loses, in the same row
+ PASS s13_orders: rolls back prepared transaction bloat_scen_s13_gxid and releases everything it holds
+
+running the statement, which is the only proof it is valid SQL
+ PASS it ran and the prepared transaction is gone
+
+expected cause
+ ROLLBACK PREPARED 'bloat_scen_s13_gxid', because a prepared transaction has no session to
+ cancel and nothing else ends it. The statement is executed here, not merely compared, so that a
+ malformed one fails the scenario rather than being read and believed.

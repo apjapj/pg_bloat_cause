@@ -187,9 +187,13 @@ done
 # once: CONTRIBUTING.md, the umbrella's README, and the v0.1.0 release body all said 13
 # scenarios. The number came from `ls scenarios/s*.sh | wc -l`, which is 13 because the glob
 # also matches standby.sh and standby-local.sh. Those are helpers, not scenarios: run.sh
-# selects s[0-9]_*.sh and s[0-9][0-9]_*.sh, which is 11, and scenarios/evidence/ holds 22
-# files, which is 11 scenarios times two PostgreSQL versions. The count below is taken the
-# same way run.sh takes it, so a helper added later cannot quietly change what a document says.
+# selects s[0-9]_*.sh and s[0-9][0-9]_*.sh, and scenarios/evidence/ holds two files per scenario,
+# one per PostgreSQL version. The count below is taken the same way run.sh takes it, so a helper added
+# later cannot quietly change what a document says.
+#
+# s12 is the first two-digit scenario, and it is why that second glob exists at all rather than
+# looking like redundancy: with only s[0-9]_*.sh, s12 would never run and the command would ship
+# untested by anything that could reach a holder.
 step "every scenario count in prose is the count run.sh will actually run"
 if [ -d scenarios ]; then
   scen_count=$(ls scenarios/s[0-9]*_*.sh 2>/dev/null | wc -l | tr -d ' ')

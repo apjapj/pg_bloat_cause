@@ -5,9 +5,8 @@ finding.** pg_bloat_cause reports one sentence per table, worst first. This docu
 decides which cause the sentence names when more than one is true, and how the others are reported.
 It was settled before any SQL, and `bloat_cause` and `bloat_cause_text()` have shipped since, as
 0.1. The rule still binds: a change to either function is a change to what this document promises,
-and this is the document to change with it. `bloat_cause_command()` is named below and has **not**
-shipped; it is README step 5, so read those sentences as the shape the command will take, not as
-behaviour you can run today.
+and this is the document to change with it. `bloat_cause_command()` shipped in 0.2, so every rule
+below is now about behaviour you can run.
 
 Every figure links to the scenario evidence it comes from; `scenarios/check-evidence.sh` fails if one
 does not. The sample sentences in code blocks show the wording: their counts are the scenarios' own,
