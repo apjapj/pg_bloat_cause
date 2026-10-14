@@ -34,7 +34,17 @@ cd "$here"
 pass=0
 allow="scripts/evidence-claims.allow"
 
-newest=$(ls pg_*.sql 2>/dev/null | grep -v -- '--.*--' | sort -t- -k3 -n | tail -1)
+# The release script named by the control file, not the result of sorting versions. Sorting got this
+# wrong on the first port to pg_limit_runway, choosing --0.2.sql over --0.2.2.sql and checking against
+# an older release: a rule that passes for the wrong reason is worse than no rule. The control file
+# states the version unambiguously and is what the extension actually installs.
+ctl=$(ls *.control 2>/dev/null | head -1)
+[ -n "$ctl" ] || die "no .control file found"
+ver=$(sed -n "s/^default_version[[:space:]]*=[[:space:]]*'\(.*\)'/\1/p" "$ctl")
+[ -n "$ver" ] || die "no default_version in $ctl"
+base=$(basename "$ctl" .control)
+newest="$base--$ver.sql"
+[ -f "$newest" ] || die "the control file names version $ver but $newest does not exist"
 [ -n "$newest" ] || die "no release script found"
 [ -f README.md ] || die "no README.md found"
 
