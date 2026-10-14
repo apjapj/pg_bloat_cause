@@ -1,15 +1,28 @@
 title = "pg_bloat_cause gitleaks config"
 
-# Inherit every default rule. pg_bloat_cause ships no credentials and has no vendor config,
-# so the default rule set is the whole policy, nothing to narrow.
+# Inherit every default rule. pg_bloat_cause ships no credentials of its own, so the default
+# rule set plus the one below is the whole policy.
 [extend]
 useDefault = true
 
-# No path allowlist on purpose. Allowlisting tests/, docs/ or examples/ is how real keys in
-# fixtures and documentation survive a scan; if a specific line is a genuine false positive,
-# suppress that one fingerprint in .gitleaksignore instead.
+# ================================================================ internal network disclosure
 #
-# There is no .secrets.baseline here, and that is deliberate. detect-secrets' false positives
-# are suppressed inline with `# pragma: allowlist-secret`, which needs no baseline file. A
-# committed baseline holds salted hashes that trip gitleaks' generic-api-key rule, which makes
-# the baseline itself uncommittable against a server-side pre-receive scan.
+# RFC1918 private addresses do not belong in a public repository: they map internal hosts to anyone
+# reading it. The registry that once appeared in the extension repositories' history did exactly
+# that, and was readable in every commit until the host was renamed.
+#
+# All three ranges, not today's subnet. A rule written for one address stops working the moment the
+# network is renumbered, which is also the moment nobody is looking.
+
+[[rules]]
+id = "internal-rfc1918-address"
+description = "RFC1918 private address: maps internal hosts to anyone reading the repository"
+regex = '''(?:\b192\.168\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\b|\b10\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\b|\b172\.(?:1[6-9]|2\d|3[01])\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\b)'''
+keywords = ["192.168.", "10.0.", "10.1.", "172.16.", "172.17.", "172.18.", "172.19.", "172.2", "172.30.", "172.31."]
+
+# Release the shape a PostgreSQL or Debian version takes. Matched against the line rather than the
+# match, because the match alone is the address part and cannot be told from a host.
+[[rules.allowlists]]
+description = "PostgreSQL and Debian version strings, not host addresses"
+regexTarget = "line"
+regexes = ['''(?:\b\d+\.){3}\d+-\d+''']
