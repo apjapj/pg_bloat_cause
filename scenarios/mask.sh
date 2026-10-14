@@ -53,6 +53,10 @@ MASKS=(
   's/ for [0-9]+(s| min| h [0-9]{2} min| days)([.,;]| \()/ for <AGE>\2/g'
   # an autovacuum worker's pid
   's/^ *[0-9]+ \| (Lock|autovacuum worker)/<PID> | \1/'
+  # A backend row whose second field is empty. The rule above needs Lock or autovacuum worker there, so
+  # "613 | | |" slipped through and a raw pid reached tracked evidence, which is what made s7 fail in
+  # CI. The s7 query is now filtered so that row should not appear at all; this is the belt.
+  's/^ *[0-9]+ \| \| /<PID> | | /'
   # pg_attribute is the CATALOG, not the fixture: how many rows it has removed and kept depends on
   # everything the cluster has done before, and so does its dead-but-not-removable count, which moved
   # between runs once a standby was attached (6,000 and 6,021). s2 reports the rows its own churn added
