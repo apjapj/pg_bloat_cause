@@ -140,11 +140,15 @@ Specific things to get right:
 - **Waits that are not locks**: an autovacuum worker waiting on a buffer pin (`BufferPin`) is not in
   the lock graph; say so rather than reporting nothing.
 
-### 5. Act: `bloat_cause_command()`
+### 5. ~~Act: `bloat_cause_command()`~~ **Done: 0.2**
 
 One statement per cause, returned and never run, as `lock_tree_command()` does. Destructive steps
 (dropping a slot, terminating a session) must say what they lose in the same row, since dropping a
 logical slot loses that consumer's position.
+
+Shipped as `bloat_cause_command()`: one row per table, the primary cause only, with `loses` beside
+the statement. `pg_cancel_backend()` rather than `pg_terminate_backend()`, `ROLLBACK PREPARED` for a
+prepared transaction, no row at all for a standby holder. See [docs/ranking.md](docs/ranking.md) rule 3.
 
 ### 6. Review and detect
 

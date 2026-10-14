@@ -24,6 +24,16 @@ evidence file is byte-identical to 0.1, and the scenario suite fails if one move
   revoking the holder from `PUBLIC` would break the two-line grant in
   [INSTALL.md](INSTALL.md) for any role following it. `EXECUTE` is not visibility: a
   role without `pg_read_all_stats` still cannot read the sessions the holder reports.
+- `bloat_cause_command(age, gap)` returns one statement per table for the primary
+  cause only, returned and never run, with what running it loses in the same row. A
+  session holder is cancelled with `pg_cancel_backend()` rather than terminated; a
+  prepared transaction takes `ROLLBACK PREPARED`. `pg_terminate_backend()` is never
+  offered, and a standby holder produces no row at all because the query is on the
+  other host.
+- Three autovacuum causes return a read-back rather than an action, because
+  `ALTER TABLE ... RESET (autovacuum_enabled)` would read as the fix and would not
+  help when the threshold is simply never reached. Only `autovacuum behind` acts,
+  with `VACUUM (VERBOSE)`.
 - Graded the way the other two functions are: not executable by `PUBLIC`.
 
 ## 0.1 (2026-10-12)
