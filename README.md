@@ -34,7 +34,7 @@ an ordinary table's. With an inactive slot in place, VACUUM removed all
 |---|---|---|
 | **Something holding back VACUUM** | The xmin horizon is pinned, so dead rows cannot be removed however often VACUUM runs | `pg_stat_activity.backend_xmin` / `backend_xid` (long transaction), `pg_replication_slots.xmin` (a standby with `hot_standby_feedback` and a physical slot: measured in s3, its horizon shows HERE and `pg_stat_replication.backend_xmin` is NULL; a logical slot's `catalog_xmin` holds back catalog tables only), `pg_stat_replication.backend_xmin` (a standby with feedback and no slot; PostgreSQL's documented behaviour, not measured here: s3 uses a slot), `pg_prepared_xacts` (orphaned prepared transaction) |
 | **Autovacuum falling behind or off** | VACUUM could clean up but is not running often enough, or at all, for this table | `pg_stat_user_tables` (`n_dead_tup`, `last_autovacuum`, `autovacuum_count`, `n_mod_since_analyze`, `n_ins_since_vacuum`), `reloptions` (`autovacuum_enabled=false`, per-table thresholds), BOTH computed trigger thresholds (dead-row and, since 13, insert-based: either one firing cleans the table), `pg_stat_progress_vacuum` |
-| **Autovacuum kept off the table by a lock** | An ordinary autovacuum does **not** wait for a lock: it skips the table and tries again next naptime, so nothing shows in `pg_stat_activity`. Only an anti-wraparound autovacuum waits, visibly | For the ordinary case: a stale `last_autovacuum` with dead rows over the threshold, and a session holding a conflicting lock in `pg_locks` (the server log says `skipping vacuum ... lock not available` when `log_autovacuum_min_duration >= 0`). For the anti-wraparound case: `backend_type = 'autovacuum worker'` with `wait_event_type = 'Lock'`. pg_lock_tree, when installed, names the holder |
+| **Autovacuum kept off the table by a lock** | An ordinary autovacuum does **not** wait for a lock: it skips the table and tries again next naptime, so nothing shows in `pg_stat_activity`. Only an anti-wraparound autovacuum waits, visibly | For the ordinary case: a stale `last_autovacuum` with dead rows over the threshold, and a session holding a conflicting lock in `pg_locks` (the server log says `skipping vacuum ... lock not available` when `log_autovacuum_min_duration >= 0`). For the anti-wraparound case: `backend_type = 'autovacuum worker'` with `wait_event_type = 'Lock'`. The holder is named from `pg_locks` joined to `pg_stat_activity`, with no dependency on `pg_lock_tree` |
 | **Updates that cannot stay on the page** | Non-HOT updates, because an indexed column changes or the page has no room (`fillfactor`) | `n_tup_upd` vs `n_tup_hot_upd`; on PG 16+ `n_tup_newpage_upd` counts updates that moved to a new page, which is evidence for "no room" (see the scenarios for how cleanly); on 14 and 15 the finding says it cannot tell the two apart |
 
 ### What a finding looks like
@@ -176,10 +176,12 @@ never calls it. There is no measured path to exercise, because `dead_rows_source
 function that [INSTALL.md](INSTALL.md) mentions is added, and it belongs with that work rather than
 before it, since before it there is no branch that could differ.
 
-The `pg_lock_tree` interaction, where a cause that is a lock names the holder, is described in the
-feature table but not tested against a cluster that has `pg_lock_tree` installed. That one is a real
-gap: the extension behaves differently when `pg_lock_tree` is present, and nothing checks it. It
-needs a second CI matrix dimension.
+The `pg_lock_tree` interaction was written up here as a real gap, and checking it showed the gap is
+not coverage at all. This extension never references `pg_lock_tree`: no `pg_extension` lookup, no
+call into it. The lock holder is named from `pg_locks` joined to `pg_stat_activity`, so it works
+whether or not `pg_lock_tree` is installed, and there is no branch that could differ. What was
+actually wrong was three prose claims saying otherwise, corrected in 0.2. Deeper integration, naming
+a whole lock chain through `pg_lock_tree`, remains on the roadmap below.
 
 ## Open questions
 
