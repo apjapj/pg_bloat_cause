@@ -5,6 +5,15 @@ a new entry gets a new version.
 
 ## 0.2 (2026-10-14)
 
+**Correction to 0.1, which is not edited because a released entry is not rewritten.** The 0.1
+entry below says "Where `pg_lock_tree` is installed, a cause that is a lock names the holder".
+That is wrong about the dependency. This extension never references `pg_lock_tree`: no
+`pg_extension` lookup, no call into it, no branch that reads it. A cause that is a lock names
+the holder from `pg_locks` joined to `pg_stat_activity`, so it does so whether or not
+`pg_lock_tree` is installed. The sentence read as though the holder were named only when
+`pg_lock_tree` is present, and the effect is the opposite: nothing needs it for this.
+
+
 The holder, in structured form. No existing output changes: every sentence and every
 evidence file is byte-identical to 0.1, and the scenario suite fails if one moves.
 
