@@ -11,7 +11,7 @@ SET client_min_messages = warning;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 CREATE EXTENSION IF NOT EXISTS pg_bloat_cause;
 \o
-SELECT plan(45);
+SELECT plan(52);
 
 SELECT has_view('bloat_cause', 'the bloat_cause view exists');
 SELECT has_function('bloat_cause_findings', ARRAY['interval', 'bigint'], 'bloat_cause_findings(interval, bigint) exists');
@@ -281,6 +281,33 @@ SELECT is(bloat_cause_age(interval '3 days 4 hours'), '3 days', 'ages of two day
   SELECT is((SELECT count(*)::int FROM bloat_cause_command()),
             (SELECT count(*)::int FROM bloat_cause_findings()),
             'bloat_cause_command() returns exactly one row per finding');
+  -- bloat_cause_measure(), added in 0.3. The lint rule forbids a function with no test that calls
+  -- it, and it is right to: the first version of bloat_cause_holder() shipped broken with every gate
+  -- green because nothing ran it. These call it, in both directions.
+  SELECT has_function('bloat_cause_measure', ARRAY['name', 'name', 'text'],
+                     'bloat_cause_measure(name, name, text) exists');
+  SELECT throws_ok($$SELECT * FROM bloat_cause_measure('public', 'no_such_table_here')$$, '42P01', NULL,
+                   'a table that does not exist is refused by name');
+  SELECT throws_ok($$SELECT * FROM bloat_cause_measure('public', 'bc_test_orders', 'sideways')$$, '22023', NULL,
+                   'a mode that is not approx or exact is refused, rather than silently treated as one of them');
+  -- The decision that matters: present always, and a clear error when pgstattuple is absent. This is
+  -- the only thing that tests it, so it is worth the setup. DROP is safe here because the suite owns
+  -- the schema and nothing else in it needs pgstattuple.
+  \o /dev/null
+  DROP EXTENSION IF EXISTS pgstattuple;
+  \o
+  SELECT throws_ok($$SELECT * FROM bloat_cause_measure('public', 'bc_test_orders')$$, '0A000', NULL,
+                   'without pgstattuple it raises rather than being absent, which is the settled decision');
+  SELECT ok((SELECT count(*) FROM pg_available_extensions WHERE name = 'pgstattuple') = 1,
+            'and the error names an extension that can be installed, so the HINT is actionable');
+  \o /dev/null
+  CREATE EXTENSION IF NOT EXISTS pgstattuple;
+  \o
+  SELECT is((SELECT dead_rows_source FROM bloat_cause_measure('public', 'bc_test_orders')),
+            'measured', 'with pgstattuple it reports measured, so it can sit beside the estimate');
+  SELECT ok((SELECT dead_rows FROM bloat_cause_measure('public', 'bc_test_orders')) >= 0,
+            'and returns a count rather than null on a table it can read');
+
 \o /dev/null
 DROP TABLE bc_test_orders;
 REVOKE ALL ON bloat_cause FROM bc_test_granted;
