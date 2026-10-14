@@ -163,6 +163,25 @@ redact query text from horizon holders before storing it.
 `pgstattuple` additionally needs: it is granted to `pg_stat_scan_tables`), a reference page, and the
 shared PG matrix. Tests run with and without pgstattuple and pg_lock_tree.
 
+Done: [INSTALL.md](INSTALL.md) and the PG 14 to 19 matrix. The reference page is a separate
+pull request, so it is not linked from here until it is merged.
+
+Two things are not done, and saying what they actually are matters more than marking the step
+complete, because the first was written up wrongly once already.
+
+The tests run **with** `pgstattuple` only, and the scenario library creates it unconditionally, so
+the suite does not run on a cluster without it. That is a gap in the harness, not in the extension:
+`pgstattuple` is a cross-check the scenarios use to confirm the statistics, and the extension itself
+never calls it. There is no measured path to exercise, because `dead_rows_source` is always
+`estimated` in 0.2. The with-or-without matrix becomes a real test when the explicit measuring
+function that [INSTALL.md](INSTALL.md) mentions is added, and it belongs with that work rather than
+before it, since before it there is no branch that could differ.
+
+The `pg_lock_tree` interaction, where a cause that is a lock names the holder, is described in the
+feature table but not tested against a cluster that has `pg_lock_tree` installed. That one is a real
+gap: the extension behaves differently when `pg_lock_tree` is present, and nothing checks it. It
+needs a second CI matrix dimension.
+
 ## Open questions
 
 - Index bloat is not in the overview. B-tree bloat has different causes (deletion patterns, no
