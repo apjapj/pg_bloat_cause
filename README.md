@@ -163,8 +163,7 @@ redact query text from horizon holders before storing it.
 `pgstattuple` additionally needs: it is granted to `pg_stat_scan_tables`), a reference page, and the
 shared PG matrix. Tests run with and without pgstattuple and pg_lock_tree.
 
-Done: [INSTALL.md](INSTALL.md) and the PG 14 to 19 matrix. The reference page is a separate
-pull request, so it is not linked from here until it is merged.
+Done: [INSTALL.md](INSTALL.md), [docs/reference.md](docs/reference.md), and the PG 14 to 19 matrix.
 
 Two things are not done, and saying what they actually are matters more than marking the step
 complete, because the first was written up wrongly once already.
