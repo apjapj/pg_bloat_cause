@@ -12,9 +12,9 @@ what pg_bloat_cause says about s12_orders
  s12_orders: 100000 dead rows (50.0%, estimated), held back by session <PID> (bloat_scen_s12, idle in transaction) for <AGE>. Then: autovacuum is disabled on this table (100000 dead rows against a threshold of 20050); 100000 of 100000 updates were not HOT; how many of them because an indexed column changed cannot be told.
 
 evidence: the holder, and the statement for it
- holder pid 753
+ holder pid <PID>
  PASS s12_orders: cause horizon holder, then %autovacuum is disabled%
- PASS s12_orders: command SELECT pg_cancel_backend(753);
+ PASS s12_orders: command SELECT pg_cancel_backend(<PID>);
 
 the same row says what it loses
  PASS s12_orders: loses names the rollback
@@ -23,7 +23,7 @@ never terminates, only cancels
  PASS no statement offers pg_terminate_backend
 
 running every statement bloat_cause_command() returns
- PASS ran: SELECT pg_cancel_backend(753);
+ PASS ran: SELECT pg_cancel_backend(<PID>);
  1 statement(s) executed
 
 expected cause

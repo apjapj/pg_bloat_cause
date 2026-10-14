@@ -14,7 +14,7 @@ VACUUM (VERBOSE) s13_orders
 
 evidence: the prepared transaction
  gid | transaction | xid_age | prepared | open_for | owner
- bloat_scen_s13_gxid | 110935 | 4 | <TIMESTAMP> | <AGE> | postgres
+ bloat_scen_s13_gxid | <XID> | <XIDAGE> | <TIMESTAMP> | <AGE> | postgres
 (1 row)
 
 

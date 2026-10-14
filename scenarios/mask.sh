@@ -27,7 +27,7 @@ MASKS=(
   # a holder session's row: pid | application_name | state | backend_xid | backend_xmin | xid_age | open_for
   's/^ *[0-9]+ \| (bloat_scen_[a-z0-9]+) +\| ([a-z ]+[a-z]) +\| +[0-9]+ \| +\| +[0-9]+ \|/<PID> | \1 | \2 | <XID> | | <XIDAGE> |/'
   # the prepared transaction's row: gid | transaction | xid_age | ...
-  's/^ (bloat_scen_gxid) +\| +[0-9]+ \| +[0-9]+ \|/ \1 | <XID> | <XIDAGE> |/'
+  's/^ (bloat_scen_[a-z0-9_]*gxid) +\| +[0-9]+ \| +[0-9]+ \|/ \1 | <XID> | <XIDAGE> |/'
   # the slot's row: ... | xmin | catalog_xmin | catalog_xmin_age
   's/^ (bloat_scen_slot) +\| logical +\| f +\| +\| +[0-9]+ \| +[0-9]+$/ \1 | logical | f | | <XID> | <XIDAGE>/'
   # s9's evidence row for the holder: cause | what | how_much (an xid age)
@@ -36,6 +36,20 @@ MASKS=(
   's/(xmin set, xmin age )[0-9]+/\1<XIDAGE>/'
   # the extension's own sentences: a session's pid, and the age after "for"
   's/session [0-9]+ \(/session <PID> (/g'
+  # A pid inside a STATEMENT, not inside a pg_stat_activity row. s12 prints the statement
+  # bloat_cause_command() built, which embeds the pid it read live, and that pid changes on every
+  # run. Masked here because the evidence diff is strict, so an unmasked pid fails the job on every
+  # run that is not the one that committed it. Found by CI failing on 14 and 18 while passing
+  # locally: locally the run that produced the evidence is the run that compares against it.
+  's/pg_cancel_backend\([0-9]+\)/pg_cancel_backend(<PID>)/g'
+  # A pid the scenario printed itself, outside any statement. s12 echoes the holder's pid so the
+  # assertion can be read against the run. Same reasoning as the statement rule above.
+  's/^( *)holder pid [0-9]+$/\1holder pid <PID>/'
+  # A slot's xmin age. s14 prints it as evidence that the standby's slot really is holding the
+  # horizon, but how many xids old it is depends on how long the feedback took, so it moves between
+  # runs on an otherwise identical cluster.
+  's/xmin age [0-9]+$/xmin age <XIDAGE>/'
+  's/pg_terminate_backend\([0-9]+\)/pg_terminate_backend(<PID>)/g'
   's/ for [0-9]+(s| min| h [0-9]{2} min| days)([.,;]| \()/ for <AGE>\2/g'
   # an autovacuum worker's pid
   's/^ *[0-9]+ \| (Lock|autovacuum worker)/<PID> | \1/'

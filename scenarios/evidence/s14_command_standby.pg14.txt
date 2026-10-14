@@ -13,7 +13,7 @@ VACUUM (VERBOSE) s14_orders
  DETAIL: 100000 dead row versions cannot be removed yet, oldest xmin: <XID>
 
 evidence on the primary: where the standby's horizon shows
- slot standby_s3: physical, xmin age 11
+ slot standby_s3: physical, xmin age <XIDAGE>
 
 evidence on the standby: the query holding it
  standby session bloat_scen_s14: idle in transaction
