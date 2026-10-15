@@ -3,6 +3,23 @@
 Versions are listed newest first. Released tags are never edited: a change that needs
 a new entry gets a new version.
 
+## 0.3 (2026-10-15)
+
+The explicit measurement, for one table, when a caller asks for it.
+
+- `bloat_cause_measure(schema, table, mode)` reads the heap through `pgstattuple` and returns
+  measured dead rows, live rows, bytes and percentage with `dead_rows_source = 'measured'`, so
+  the row can be put beside the estimate for the same table.
+- `mode` is `approx` (default, `pgstattuple_approx()`, reading only the pages the visibility map
+  does not cover) or `exact` (`pgstattuple()`, the whole table). The choice is the caller's,
+  because `pgstattuple()` reads everything and that must never happen implicitly.
+- The function is always present and raises when `pgstattuple` is not installed, naming the
+  extension and the statement that installs it, rather than being absent and leaving the caller
+  with "function does not exist" and no next step.
+- Nothing existing changes: the view, the sentences, the holders and the command all stay on the
+  estimate. The exact read happens only where a caller asks for it, which is the contract in
+  README's "Measuring bloat" and [docs/measure.md](docs/measure.md).
+
 ## 0.2 (2026-10-14)
 
 **Correction to 0.1, which is not edited because a released entry is not rewritten.** The 0.1
