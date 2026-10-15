@@ -1,0 +1,33 @@
+
+part 1: what can be established without a vacuum
+
+the usual hand-written query (pg_stat_user_tables)
+ relname | n_live_tup | n_dead_tup | dead_pct | last_autovacuum | last_vacuum
+ s11_orders | 100000 | 100000 | 50.0 | |
+(1 row)
+
+
+measured (pgstattuple)
+ s11_orders: 100000 live rows, 100000 dead rows, 47.07% of the table is dead tuples
+ never vacuumed: true
+ holder present: bloat_scen_s11, idle in transaction
+ finding: cause not established; the table has never been vacuumed, so it cannot be told
+ whether session bloat_scen_s11 is holding these rows back. Run VACUUM (VERBOSE) on it.
+
+what pg_bloat_cause says about s11_orders
+ s11_orders: 100000 dead rows (50.0%, estimated), autovacuum is disabled on this table (100000 dead rows against a threshold of 20050). Then: 100000 of 100000 updates were not HOT; how many of them because an indexed column changed cannot be told. Not established: session <PID> (bloat_scen_s11, idle in transaction) is present, but whether it holds these rows back is not established: this table has never been vacuumed. Run VACUUM (VERBOSE) on it; "dead but not yet removable" above zero means it does.
+ PASS s11_orders: cause autovacuum disabled, unknowns %bloat_scen_s11%not established: this table has never been vacuumed%
+
+part 2: the finding's instruction, followed
+
+VACUUM (VERBOSE) s11_orders
+ tuples: 100000 removed, 100000 remain, 0 are dead but not yet removable
+ removable cutoff: <XID>, which was <XIDAGE> XIDs old when operation ended
+
+what pg_bloat_cause says about s11_orders
+ (no finding: s11_orders does not appear)
+ PASS s11_orders: cause none
+
+expected cause
+ part 1 cannot tell, and says the same as s10. Part 2 shows the holder does NOT bind: VACUUM
+ removes every dead row. Opened after the updates committed, its snapshot already sees them as dead.

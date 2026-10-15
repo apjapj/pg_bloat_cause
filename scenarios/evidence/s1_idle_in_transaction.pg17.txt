@@ -1,0 +1,27 @@
+
+the usual hand-written query (pg_stat_user_tables)
+ relname | n_live_tup | n_dead_tup | dead_pct | last_autovacuum | last_vacuum
+ s1_orders | 100000 | 100000 | 50.0 | |
+(1 row)
+
+
+measured (pgstattuple)
+ s1_orders: 100000 live rows, 100000 dead rows, 47.07% of the table is dead tuples
+
+VACUUM (VERBOSE) s1_orders
+ tuples: 0 removed, 200000 remain, 100000 are dead but not yet removable
+ removable cutoff: <XID>, which was <XIDAGE> XIDs old when operation ended
+
+evidence: who holds the horizon
+ pid | application_name | state | backend_xid | backend_xmin | xid_age | open_for
+<PID> | bloat_scen_s1 | idle in transaction | <XID> | | <XIDAGE> | <AGE>
+(1 row)
+
+
+what pg_bloat_cause says about s1_orders
+ s1_orders: 100000 dead rows (50.0%, estimated), held back by session <PID> (bloat_scen_s1, idle in transaction) for <AGE>. Then: autovacuum is disabled on this table (100000 dead rows against a threshold of 20050); 100000 of 100000 updates were not HOT; how many of them because an indexed column changed cannot be told.
+ PASS s1_orders: cause horizon holder, then %autovacuum is disabled%
+
+expected cause
+ held back by session bloat_scen_s1, idle in transaction since the updates. VACUUM removes
+ nothing until it ends; terminating it is the fix, VACUUM is not.
