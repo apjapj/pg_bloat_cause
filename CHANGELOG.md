@@ -3,6 +3,23 @@
 Versions are listed newest first. Released tags are never edited: a change that needs
 a new entry gets a new version.
 
+## 0.3.1 (2026-10-15)
+
+**0.3.0's `bloat_cause_measure()` never worked.** It built the heap read with `format('%L', oid)`,
+which quotes the oid, so `pgstattuple` received the string `'19223'` and looked up a relation
+named `19223`:
+
+    ERROR: relation "19223" does not exist
+
+The cast is now `%s::regclass`, which is the oid itself and means no name lookup happens at all.
+That is also the safer form, because resolving a name is the step that checks the caller's
+privileges, and that class of defect has been found twice already in this family.
+
+- A scenario now asserts the **figure**, not only the label: `dead_rows > 0` and both modes
+  agreeing within 5 percent on an idle table, and landing within a factor of two of the estimate
+  the findings report for the same table. The 0.3.0 pgTAP assertions asserted
+  `dead_rows_source = 'measured'`, which the broken function satisfied.
+
 ## 0.3 (2026-10-15)
 
 The explicit measurement, for one table, when a caller asks for it.
