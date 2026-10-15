@@ -1,0 +1,25 @@
+
+the measurement, both modes
+ mode | dead_rows | live_rows | dead_bytes | dead_pct | dead_rows_source
+ approx | 10000 | 20000 | 1330000 | 33.3 | measured
+ exact | 10000 | 20000 | 1330000 | 33.3 | measured
+(2 rows)
+
+
+the estimate for the same table, for comparison
+ relname | dead_rows | dead_pct | dead_rows_source
+ s15_orders | 10000 | 33.3 | estimated
+(1 row)
+
+
+checks
+ PASS approx reports dead_rows_source = measured
+ PASS and reports a positive count of dead rows, not a zero with a confident label
+ PASS exact also reports measured, and a positive count
+ PASS the two modes agree within 5 percent on an idle table
+ PASS the measured count is within a factor of two of the estimate, so they are the same table
+
+expected cause
+ measured dead rows for one table, with dead_rows_source = 'measured', agreeing between
+ approx and exact on an idle table and landing near the estimate the findings report. The absence of
+ pgstattuple is a pgTAP case, not this one.

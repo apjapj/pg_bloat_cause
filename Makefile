@@ -1,6 +1,6 @@
 # pg_bloat_cause Makefile
 EXTENSION = pg_bloat_cause
-DATA      = pg_bloat_cause--0.1.sql pg_bloat_cause--0.2.sql pg_bloat_cause--0.3.sql pg_bloat_cause--0.1--0.2.sql pg_bloat_cause--0.2--0.3.sql
+DATA      = pg_bloat_cause--0.1.sql pg_bloat_cause--0.2.sql pg_bloat_cause--0.3.sql pg_bloat_cause--0.3.1.sql pg_bloat_cause--0.1--0.2.sql pg_bloat_cause--0.2--0.3.sql pg_bloat_cause--0.3--0.3.1.sql
 PGFILEDESC = "pg_bloat_cause - why dead rows are not being cleaned up"
 
 PG_CONFIG = pg_config
