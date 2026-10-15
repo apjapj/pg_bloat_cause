@@ -11,7 +11,7 @@ SET client_min_messages = warning;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 CREATE EXTENSION IF NOT EXISTS pg_bloat_cause;
 \o
-SELECT plan(52);
+SELECT plan(54);
 
 SELECT has_view('bloat_cause', 'the bloat_cause view exists');
 SELECT has_function('bloat_cause_findings', ARRAY['interval', 'bigint'], 'bloat_cause_findings(interval, bigint) exists');
@@ -81,8 +81,16 @@ DROP ROLE IF EXISTS bc_test_none;
 DROP ROLE IF EXISTS bc_test_granted;
 CREATE ROLE bc_test_none;
 CREATE ROLE bc_test_granted;
+-- pgstattuple is installed for the whole file from here on, because the role assertions below need it:
+-- without it the measurement raises 0A000 and the assertion would be testing the wrong refusal.
+\o /dev/null
+CREATE EXTENSION IF NOT EXISTS pgstattuple;
+\o
 GRANT SELECT ON bloat_cause TO bc_test_granted;
 GRANT EXECUTE ON FUNCTION bloat_cause_findings(interval, bigint), bloat_cause_text(interval, bigint) TO bc_test_granted;
+-- The measure function too, so the test below is about its TABLE privilege and not about a missing
+-- grant on the function itself. Those are two different refusals and the distinction is the point.
+GRANT EXECUTE ON FUNCTION bloat_cause_measure(name, name, text) TO bc_test_granted;
 \o
 
 SET ROLE bc_test_none;
@@ -90,6 +98,8 @@ SELECT throws_ok('SELECT count(*) FROM bloat_cause', '42501', NULL,
                  'a role with no grant is refused by the view');
 SELECT throws_ok('SELECT count(*) FROM bloat_cause_text()', '42501', NULL,
                  'and by bloat_cause_text(), which is not executable by PUBLIC');
+SELECT throws_ok($$SELECT * FROM bloat_cause_measure('public', 'bc_test_orders')$$, '42501', NULL,
+                 'and by bloat_cause_measure(), which is revoked like the rest');
 RESET ROLE;
 
 SET ROLE bc_test_granted;
@@ -113,6 +123,16 @@ SELECT lives_ok($$SELECT count(*) FROM bloat_cause$$,
 SELECT is((SELECT unknowns[1] LIKE 'this role cannot see other users'' sessions (it lacks pg_read_all_stats)%'
            FROM bloat_cause WHERE relname = 'bc_test_orders'), true,
           'and being able to execute the holder still does not let it see other users sessions');
+-- The unprivileged path for the measurement, which is the one that has found every permission defect in
+-- this family. This role may EXECUTE bloat_cause_measure(), and is still refused, because pgstattuple's
+-- own functions are granted to pg_stat_scan_tables rather than to PUBLIC. Measured rather than assumed:
+-- the error is "permission denied for function pgstattuple_approx", not a table-read refusal, and the
+-- message says so because the first version of this assertion claimed the wrong cause and was wrong.
+--
+-- What matters either way is that the extension neither widens that refusal nor hides it, and that the
+-- caller-with-EXECUTE case is not silently allowed. A grant on the function alone would get this wrong.
+SELECT throws_ok($$SELECT * FROM bloat_cause_measure('public', 'bc_test_orders')$$, '42501', NULL,
+                 'a role that may execute the measurement is still refused by pgstattuple, whose functions are not PUBLIC');
 RESET ROLE;
 
 -- Once vacuumed, the table has nothing to say: no dead rows, no row. On a primary with a feedback
@@ -312,6 +332,7 @@ SELECT is(bloat_cause_age(interval '3 days 4 hours'), '3 days', 'ages of two day
 DROP TABLE bc_test_orders;
 REVOKE ALL ON bloat_cause FROM bc_test_granted;
 REVOKE ALL ON FUNCTION bloat_cause_findings(interval, bigint), bloat_cause_text(interval, bigint) FROM bc_test_granted;
+REVOKE ALL ON FUNCTION bloat_cause_measure(name, name, text) FROM bc_test_granted;
 DROP ROLE bc_test_none;
 DROP ROLE bc_test_granted;
 \o
