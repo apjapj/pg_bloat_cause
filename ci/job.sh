@@ -38,6 +38,14 @@ step "install the extension"
 scenarios/install-extension.sh "bc-pri-$v" "bc-sby-$v" || exit 1
 
 export PGHOST=127.0.0.1 PGPORT=$pport PGUSER=postgres PGPASSWORD=test PGDATABASE=postgres
+
+# BEFORE pgTAP, because the pgTAP file creates pgstattuple and this check needs a cluster that has
+# never had it. Deliberately a step in this job rather than a second matrix job: a new job's name
+# would not be in the required-checks ruleset, so it would run and gate nothing, while a step in a
+# required job cannot be ignored. See ci/check-no-pgstattuple.sh.
+step "the measurement with no pgstattuple ever installed"
+ci/check-no-pgstattuple.sh || fail=1
+
 step "pgTAP"
 pg_prove --dbname postgres test/*.sql || fail=1
 
