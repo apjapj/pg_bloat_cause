@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ci/check-no-pgstattuple.sh — the measurement's behaviour on a cluster that never installed pgstattuple.
+# ci/check-no-pgstattuple.sh: the measurement's behaviour on a cluster that never installed pgstattuple.
 #
 # Why this is a step and not a second matrix job. It has to run on a cluster where pgstattuple was never
 # created, and the pgTAP suite creates it, so it belongs BEFORE pgTAP in ci/job.sh. A separate job would
