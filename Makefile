@@ -28,5 +28,8 @@ lint:
 	# Every catalog a README feature table names is one the release script reads. Six wrong
 	# claims of that kind were found by hand in one afternoon, and a manual pass is forgotten.
 	./scripts/check-evidence-claims.sh
+	# A document that states the PostgreSQL range the matrix covers must state the range the
+	# workflow declares. README claimed 14 to 19 while CI ran 14 and 18, for its whole life.
+	./scripts/check-pg-matrix-claims.sh
 
 .PHONY: install prove lint
