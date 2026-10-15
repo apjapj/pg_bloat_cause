@@ -1,0 +1,37 @@
+ part 1: waiting 40 s for an ordinary autovacuum to try the table
+
+the usual hand-written query (pg_stat_user_tables)
+ relname | n_live_tup | n_dead_tup | dead_pct | last_autovacuum | last_vacuum
+ s7_orders | 100000 | 100000 | 50.0 | |
+(1 row)
+
+
+evidence, part 1: autovacuum workers on this table right now (expected: none)
+ pid | backend_type | wait_event_type | wait_event | query
+(0 rows)
+
+
+evidence, part 1: the server log, if this is one of the scenario containers
+ autovacuum logged "skipping vacuum of s7_orders --- lock not available" at least 3 times in 40 s: true
+
+what pg_bloat_cause says about s7_orders
+ s7_orders: 100000 dead rows (50.0%, estimated), session <PID> (bloat_scen_s7) has held ShareUpdateExclusiveLock on it for <AGE>, which vacuum needs, so autovacuum skips the table. Then: 100000 of 100000 updates were not HOT; how many of them because an indexed column changed cannot be told.
+ PASS s7_orders: cause lock keeps vacuum off
+
+part 2: forcing an anti-wraparound autovacuum
+ age(relfrozenxid) is at least 110,000 xids, over the table's autovacuum_freeze_max_age of 100,000: t
+
+evidence, part 2: autovacuum workers now
+ pid | wait_event_type | wait_event | query
+<PID> | Lock | relation | autovacuum: VACUUM ANALYZE bloat_scen.s7_orders (to prevent wraparound)
+(1 row)
+
+
+what pg_bloat_cause says about s7_orders
+ s7_orders: 100000 dead rows (50.0%, estimated), an anti-wraparound autovacuum is waiting on a lock that session <PID> (bloat_scen_s7) has held for <AGE> (ShareUpdateExclusiveLock). Then: 100000 of 100000 updates were not HOT; how many of them because an indexed column changed cannot be told.
+ PASS s7_orders: cause lock blocks anti-wraparound vacuum
+
+expected cause
+ part 1: autovacuum skipped s7_orders because session bloat_scen_s7 holds a conflicting
+ lock; invisible except as a stale last_autovacuum and a log line. Part 2: an anti-wraparound
+ autovacuum waits on the same lock, visibly. Either way the fix is to end the lock holder.

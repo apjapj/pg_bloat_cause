@@ -1,0 +1,24 @@
+ waiting 40 s, four autovacuum naptimes
+
+the usual hand-written query (pg_stat_user_tables)
+ relname | n_live_tup | n_dead_tup | dead_pct | last_autovacuum | last_vacuum
+ s6_orders | 100000 | 199996 | 66.7 | |
+(1 row)
+
+
+measured (pgstattuple)
+ s6_orders: 100000 live rows, 66667 dead rows, 20.8% of the table is dead tuples
+
+evidence: the table's threshold against its dead rows
+ relname | reloptions | n_dead_tup | autovacuum_count | would_trigger_at
+ s6_orders | {autovacuum_vacuum_threshold=5000000,autovacuum_vacuum_scale_factor=0.5,autovacuum_vacuum_insert_threshold=5000000,autovacuum_vacuum_insert_scale_factor=0.5} | 199996 | 0 | 5050000
+(1 row)
+
+
+what pg_bloat_cause says about s6_orders
+ s6_orders: 199996 dead rows (66.7%, estimated), its own autovacuum thresholds (5050000 dead rows, 5050000 inserted rows) are never reached. Then: 199977 of 200001 updates were not HOT; how many of them because an indexed column changed cannot be told.
+ PASS s6_orders: cause autovacuum thresholds not reached
+
+expected cause
+ autovacuum is enabled but s6_orders' own threshold (5,000,000 + 0.5 x rows) is far above
+ its dead rows, so it never triggers. The fix is to reset or lower the per-table thresholds.

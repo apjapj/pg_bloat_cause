@@ -42,7 +42,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        pg: ["14", "18"]
+        # Every stable version in the supported range, not a sample of it. 14 and 18 were the whole
+        # matrix until this, which meant 15, 16 and 17 were never run anywhere, while the README said
+        # the "PG 14 to 19 matrix" was done. All three pass on this harness when run by hand; they now
+        # run on every push. 19 is NOT here: its image needs the include form and a separate apt major,
+        # the way pg_lock_tree does it, and that is a separate change rather than a silent omission.
+        pg: ["14", "15", "16", "17", "18"]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: psql and pg_prove on the runner

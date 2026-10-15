@@ -1,0 +1,32 @@
+
+the usual hand-written query (pg_stat_user_tables)
+ relname | n_live_tup | n_dead_tup | dead_pct | last_autovacuum | last_vacuum
+ s2_orders | 100000 | 100000 | 50.0 | |
+(1 row)
+
+
+measured (pgstattuple)
+ s2_orders: 100000 live rows, 100000 dead rows, 47.07% of the table is dead tuples
+
+VACUUM (VERBOSE) s2_orders
+ tuples: 100000 removed, 100000 remain, 0 are dead but not yet removable
+ removable cutoff: <XID>, which was <XIDAGE> XIDs old when operation ended
+
+VACUUM (VERBOSE) pg_catalog.pg_attribute
+ pg_attribute tuples: <N> removed, <N> remain, <N> are dead but not yet removable
+ pg_attribute removable cutoff: <XID>, which was <XIDAGE> XIDs old when operation ended
+ dead rows in pg_attribute that VACUUM left, added by the 300 temporary-table cycles: 6000
+
+evidence: the slot
+ slot_name | slot_type | active | xmin | catalog_xmin | catalog_xmin_age
+ bloat_scen_slot | logical | f | | <XID> | <XIDAGE>
+(1 row)
+
+
+what pg_bloat_cause says about s2_orders
+ (no finding: s2_orders does not appear)
+ PASS s2_orders: cause none
+
+expected cause
+ NOT the user table: s2_orders' dead rows are removable. The slot holds back catalog rows
+ only (pg_attribute above), and the WAL it retains. A finding that blames it for a user table is wrong.
