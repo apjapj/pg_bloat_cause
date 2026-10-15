@@ -163,11 +163,9 @@ redact query text from horizon holders before storing it.
 `pgstattuple` additionally needs: it is granted to `pg_stat_scan_tables`), a reference page, and the
 shared PG matrix. Tests run with and without pgstattuple and pg_lock_tree.
 
-Done: [INSTALL.md](INSTALL.md), [docs/reference.md](docs/reference.md), and the PG matrix. The matrix
-runs **14 to 18**, which is every stable version in the supported range, and **not 19**: its image
-needs the `include` form and a separate apt major, as pg_lock_tree's workflow does it, and that is
-an open item rather than a done one. This sentence previously claimed "the PG 14 to 19 matrix"
-while CI ran only 14 and 18, which is the kind of claim this repository now has a lint for.
+Done: [INSTALL.md](INSTALL.md), [docs/reference.md](docs/reference.md), and the PG matrix, which **runs
+14 to 18** on every push. 19 is deliberately not in it: its image needs the `include` form and a separate
+apt major, as pg_lock_tree's workflow does it. That is an open item rather than a done one.
 
 Two things are not done, and saying what they actually are matters more than marking the step
 complete, because the first was written up wrongly once already.
