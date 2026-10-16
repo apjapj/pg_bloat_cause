@@ -38,6 +38,11 @@ export PGHOST=127.0.0.1 PGPORT=$port PGUSER=postgres PGPASSWORD=test PGDATABASE=
 # The pristine extension, so a patch has something to overwrite and a restore has a target.
 ./scenarios/install-extension.sh "$c" >/dev/null || exit 1
 extdir=$(docker exec "$c" sh -c 'pg_config --sharedir')/extension
+ext=$(basename "$(ls ./*.control 2>/dev/null | head -1)" .control)
+# Drop the extension before each run. A test that creates it outside a transaction leaves it
+# installed, and the next run's CREATE EXTENSION IF NOT EXISTS would then reuse the old objects
+# instead of reading the file that was just swapped, so the mutant would never load.
+drop_ext() { [ -n "$ext" ] && psql -qX -c "DROP EXTENSION IF EXISTS \"$ext\" CASCADE" >/dev/null 2>&1; }
 
 put() {
     docker cp "$1" "$c:/tmp/bc-defect-$2" >/dev/null
@@ -57,6 +62,17 @@ for patch in defects/*.patch; do
     fi
     total=$((total+1))
 
+    drop_ext
+    # Control: the test must PASS on the pristine tree, or "caught" means nothing. Without it a test
+    # that fails for an unrelated reason reads as a caught defect. The tree is pristine here because
+    # every cell restores before returning.
+    ctl=$(pg_prove --dbname postgres "$test" 2>&1); crc=$?
+    if [ $crc -ne 0 ]; then
+        echo "  $id: COULD-NOT-RUN (the control failed: $test does not pass on the clean tree)"
+        printf '%s\n' "$ctl" | grep -vE '^ok ' | sed 's/^/        /' | tail -3
+        norun=$((norun+1)); continue
+    fi
+
     touched=$(grep -E '^\+\+\+ ' "$patch" | sed -E 's#^\+\+\+ (b/)?##')
     tmp=$(mktemp -d)
     for f in $touched; do mkdir -p "$tmp/$(dirname "$f")" && cp "$f" "$tmp/$f"; done
@@ -67,6 +83,7 @@ for patch in defects/*.patch; do
     for f in $touched; do put "$tmp/$(basename "$f")" "$(basename "$f")"; done
     rm -rf "$tmp"
 
+    drop_ext
     out=$(pg_prove --dbname postgres "$test" 2>&1); rc=$?
     if [ $rc -eq 0 ]; then
         echo "  $id: MISSED (the defect does not make $test fail)"
