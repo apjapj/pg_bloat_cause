@@ -9,8 +9,13 @@ include $(PGXS)
 
 # The pgTAP suite against an already-installed extension; libpq environment variables pick the server.
 TESTDB ?= postgres
+PG ?= 18
 prove:
 	pg_prove --dbname $(TESTDB) test/*.sql
+defects:
+	# Re-inject every recorded defect (defects/) and require the test that caught it to fail
+	# again; a defect the suite no longer catches is a regression and exits non-zero.
+	./scripts/check-defects.sh $(PG)
 
 # Every figure the documentation links to scenario evidence must be in that file. No database.
 lint:
@@ -32,4 +37,4 @@ lint:
 	# workflow declares. README claimed 14 to 19 while CI ran 14 and 18, for its whole life.
 	./scripts/check-pg-matrix-claims.sh
 
-.PHONY: install prove lint
+.PHONY: install prove defects lint

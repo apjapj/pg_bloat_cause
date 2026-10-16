@@ -11,7 +11,7 @@ SET client_min_messages = warning;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 CREATE EXTENSION IF NOT EXISTS pg_bloat_cause;
 \o
-SELECT plan(54);
+SELECT plan(55);
 
 SELECT has_view('bloat_cause', 'the bloat_cause view exists');
 SELECT has_function('bloat_cause_findings', ARRAY['interval', 'bigint'], 'bloat_cause_findings(interval, bigint) exists');
@@ -327,6 +327,13 @@ SELECT is(bloat_cause_age(interval '3 days 4 hours'), '3 days', 'ages of two day
             'measured', 'with pgstattuple it reports measured, so it can sit beside the estimate');
   SELECT ok((SELECT dead_rows FROM bloat_cause_measure('public', 'bc_test_orders')) >= 0,
             'and returns a count rather than null on a table it can read');
+  -- mode 'exact' reads with pgstattuple(), which has BOTH a text and a regclass overload, so a
+  -- quoted oid is looked up as a NAME there and fails; mode 'approx' (the default above) calls
+  -- pgstattuple_approx(), whose only overload is regclass, so a quoted oid is taken as the oid and
+  -- the defect never showed. This is the assertion that catches it: 0.3.0's measure used %L on this
+  -- path and test/01 exercised only the default mode, so nothing here failed.
+  SELECT is((SELECT dead_rows_source FROM bloat_cause_measure('public', 'bc_test_orders', 'exact')),
+            'measured', 'the exact mode reads the heap too, and does not quote the oid into a name lookup');
 
 \o /dev/null
 DROP TABLE bc_test_orders;

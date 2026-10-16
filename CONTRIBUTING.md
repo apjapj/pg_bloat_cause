@@ -11,6 +11,7 @@ applies to a repository with 15 scenarios, 54 tests and three release scripts.
 | `make install` | Installs the control file and every script in `DATA` via PGXS. | A superuser shell and the server headers (`postgresql-server-dev-NN`). |
 | `make prove` | `pg_prove --dbname $(TESTDB) test/*.sql`. Default `TESTDB` is `postgres`; override it with `make prove TESTDB=...`. | An installed extension and a running server. The libpq variables in your environment pick the server. |
 | `make lint` | Three scripts, no database: `scripts/lint-docs.sh`, `scenarios/check-evidence.sh`, `scripts/check-workflows.sh`. | Nothing. Safe anywhere, cheap enough for a pre-commit hook. |
+| `make defects` | Re-injects every defect in `defects/` and requires the test that caught it to fail again; `PG=18` picks the server image. | Docker, `pg_prove` and `patch`. Not part of `make lint`. |
 
 CI runs `make lint` and the tests on PostgreSQL 14 and 18, and runs the scenario suite in
 a container built from `ci/Dockerfile`. It does not run `make install` against your
@@ -36,7 +37,7 @@ breaks one will go red rather than pass quietly.
 
 ## Tests
 
-`test/01_bloat_cause.sql` is one file with `plan(19)`. The plan must match the number of
+`test/01_bloat_cause.sql` is one file with `plan(55)`. The plan must match the number of
 assertions; the lint does not check that here, so if you add an assertion, count it.
 
 ### A test that cannot fail is not a test
@@ -96,6 +97,12 @@ evidence that it can.
 #    not land, which is worth knowing before you change the check
 # 4. restore, reinstall, and run it again to see it pass
 ```
+
+That is for the check you are writing. For a defect that was already fixed, the record is kept so
+the catching is permanent: every defect the extension has had is in `defects/`, and `make defects`
+re-injects each one and requires its test to fail, so a later change that stops catching it is
+reported rather than silently lost. When you fix a bug, keep the test that caught it and save the
+reverse of the fix as `<id>.patch` with its `.meta` beside it; `defects/README.md` says how.
 
 ## Releasing
 

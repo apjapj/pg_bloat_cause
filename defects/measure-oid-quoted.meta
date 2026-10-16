@@ -1,0 +1,10 @@
+id=measure-oid-quoted
+class=derivation
+found=after 0.3.0 shipped, 2026-10-15
+fixed=0.3.1
+test=test/01_bloat_cause.sql
+detail=bloat_cause_measure() built the pgstattuple read with format('%L', oid), which quotes the oid,
+       so pgstattuple received the string '19223' and looked up a relation named 19223: ERROR:
+       relation "19223" does not exist. The cast is %s::regclass, which is the oid itself and does
+       no name lookup. test/01 calls the measure and reads its result, so a quoted oid fails the
+       file.

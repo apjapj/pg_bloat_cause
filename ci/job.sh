@@ -22,6 +22,22 @@
 set -uo pipefail
 v=${1:?usage: ci/job.sh <postgres major version>}
 cd "$(dirname "$0")/.."
+
+# Preflight. This job needs two things from Docker before it can do anything: the CLI on PATH and a
+# daemon that answers. A daemon that is not there fails later as "failed to connect to the docker
+# API", and the build that follows reads like a bad Dockerfile, so neither cause nor fix is named.
+# standby.sh also creates a network the two containers join; that failure is a Docker error too, and
+# is caught here first. The same failure hit the Forgejo copy once and was invisible for five runs.
+if ! command -v docker >/dev/null 2>&1; then
+    echo "ci/job.sh: the docker CLI is not on PATH" >&2
+    exit 1
+fi
+if ! docker info >/dev/null 2>&1; then
+    echo "ci/job.sh: the docker daemon is not answering${DOCKER_HOST:+ (DOCKER_HOST=$DOCKER_HOST)}" >&2
+    echo "           start it, or point DOCKER_HOST at a reachable daemon; this job needs it" >&2
+    exit 1
+fi
+
 image="bc-ci:$v"; pport=57$v; sport=$((57${v} + 1))
 fail=0
 step() { printf '\n== %s\n' "$1"; }
