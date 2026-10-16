@@ -24,16 +24,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - name: no workflow file has a duplicated key
-        # A plain `yaml.safe_load` accepts a duplicate key silently and keeps the last one, which is
-        # how a duplicated env block shipped and Forgejo then refused to dispatch the workflow at all
-        # while every other check reported it fine. See scripts/check-workflows.sh.
-        run: ./scripts/check-workflows.sh
-      - name: the version agrees across control, the newest release and the README header
-        # The check that would have caught a README still calling a built 0.1 "design only".
-        run: ./scripts/lint-docs.sh
-      - name: every linked figure is in its evidence file
-        run: ./scenarios/check-evidence.sh
+      # scripts/lint.sh, not the checks one by one: three of the six were only in `make lint`, so
+      # they never ran in CI. The script is the list.
+      - name: every database-free check
+        run: ./scripts/lint.sh
       - name: every script parses
         run: for s in scenarios/*.sh ci/*.sh scripts/*.sh; do bash -n "$s" || exit 1; done
 
@@ -58,3 +52,12 @@ jobs:
         # Strict: a difference in the masked evidence fails the job, like pgTAP and the scenario
         # assertions. See ci/README.md for why it started report-only and what the first run showed.
         run: ./ci/job.sh ${{ matrix.pg }}
+
+  # One command, the same in both copies: check-defects.sh picks container mode here (Docker is on
+  # this runner) and local mode on the Forgejo copy (its runner is a PostgreSQL and has no Docker).
+  # scripts/check-ci-parity.sh holds the two to it.
+  defects:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - run: make defects PG=18

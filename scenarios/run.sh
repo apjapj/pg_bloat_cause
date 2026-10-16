@@ -12,10 +12,11 @@
 out="$HERE/out"; mkdir -p "$out"
 evidence=${EVIDENCE_DIR:-"$HERE/evidence"}; mkdir -p "$evidence"
 major=$((VER / 10000))
+: > "$RUNDIR/order-warnings"
 for s in "$HERE"/s[0-9]_*.sh "$HERE"/s[0-9][0-9]_*.sh; do
     name=$(basename "$s" .sh)
     "$HERE/teardown.sh" >/dev/null
-    bash "$s" > "$out/$name.pg$major.txt" 2>&1
+    LR_SCENARIO=$name bash "$s" > "$out/$name.pg$major.txt" 2>&1
     case $? in 0) r=ran ;; 3) r=SKIP ;; *) r=FAILED ;; esac
     # An assertion about the extension's finding that did not hold fails the scenario, even though the
     # script itself ran to the end.
@@ -24,3 +25,14 @@ for s in "$HERE"/s[0-9]_*.sh "$HERE"/s[0-9][0-9]_*.sh; do
     printf '  %-28s %s\n' "$name" "$r"
 done
 "$HERE/teardown.sh" >/dev/null
+
+# The exact nondeterministic-order rule from the capture: a val() that returned more than one row and
+# had no ORDER BY, where the row count is known and not guessed. A set-returning function is excluded
+# in lib.sh, its order being its own. This fails the run: the printed order is the output.
+if [ -s "$RUNDIR/order-warnings" ]; then
+    printf '\n  nondeterministic-order: %s statement(s) returned more than one row with no ORDER BY:\n' \
+        "$(wc -l < "$RUNDIR/order-warnings")"
+    sed 's/^/    /' "$RUNDIR/order-warnings"
+    echo "  FAILED: nondeterministic-order"
+    exit 1
+fi

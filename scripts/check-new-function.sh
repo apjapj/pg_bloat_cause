@@ -63,9 +63,10 @@ for f in $funcs; do
     fi
 done
 
-# The check itself must not be deleted silently, since deleting it restores the blind spot.
-if ! grep -q 'check-new-function.sh' Makefile; then
-    die "scripts/check-new-function.sh exists but the lint target does not run it, so it does nothing. Add it to the lint target in the Makefile."
+# The check itself must not be deleted silently, since deleting it restores the blind spot. The list
+# of checks moved from the Makefile's lint target to scripts/lint.sh, so it looks there now.
+if ! grep -q 'check-new-function.sh' scripts/lint.sh; then
+    die "scripts/check-new-function.sh exists but scripts/lint.sh does not run it, so it does nothing. Add it to scripts/lint.sh."
 fi
 
 echo "  $pass check(s) passed, 0 failed"

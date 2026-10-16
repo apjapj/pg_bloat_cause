@@ -1,0 +1,15 @@
+--- a/pg_bloat_cause--0.3.1.sql
++++ b/pg_bloat_cause--0.3.1.sql
+@@ -592,10 +592,10 @@
+     -- up a RELATION NAMED 19223, which does not exist: 'relation "19223" does not exist'. Casting the
+     -- oid avoids a name lookup entirely, which is both correct and safer, because resolving a name
+     -- is what checks the caller's schema privileges.
+-    EXECUTE format('SELECT tuple_count, dead_tuple_count, dead_tuple_len FROM pgstattuple(%s::regclass)', v_relid)
++    EXECUTE format('SELECT tuple_count, dead_tuple_count, dead_tuple_len FROM pgstattuple(%L)', v_relid)
+        INTO v_live, v_dead, v_dlen;
+   ELSE
+-        EXECUTE format('SELECT approx_tuple_count, dead_tuple_count, dead_tuple_len FROM pgstattuple_approx(%s::regclass)', v_relid)
++        EXECUTE format('SELECT approx_tuple_count, dead_tuple_count, dead_tuple_len FROM pgstattuple_approx(%L)', v_relid)
+        INTO v_live, v_dead, v_dlen;
+   END IF;
+ 
