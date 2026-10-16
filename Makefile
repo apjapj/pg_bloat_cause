@@ -19,22 +19,8 @@ defects:
 
 # Every figure the documentation links to scenario evidence must be in that file. No database.
 lint:
-	# The doc-facts checks, ported from pg_lock_tree's scripts/lint-docs.sh: the version agrees
-	# across control and the newest release and the README header, every SQL file is installed
-	# with no DATA duplicate, local doc paths resolve, and no em-dashes.
-	./scripts/lint-docs.sh
-	./scenarios/check-evidence.sh
-	# Rejects a duplicated mapping key, which PyYAML accepts silently and Forgejo does not.
-	# A workflow with one dispatches no jobs at all and its run reads as a plain failure.
-	./scripts/check-workflows.sh
-	# Every function in the newest release script is called by a test. The first version of
-	# bloat_cause_holder() shipped broken and every gate here was green, because nothing ran it.
-	./scripts/check-new-function.sh
-	# Every catalog a README feature table names is one the release script reads. Six wrong
-	# claims of that kind were found by hand in one afternoon, and a manual pass is forgotten.
-	./scripts/check-evidence-claims.sh
-	# A document that states the PostgreSQL range the matrix covers must state the range the
-	# workflow declares. README claimed 14 to 19 while CI ran 14 and 18, for its whole life.
-	./scripts/check-pg-matrix-claims.sh
+	# Every database-free check, in one script. Not the recipe: the Makefile needs pgxs.mk to parse,
+	# and scripts/lint.sh needs no PostgreSQL toolchain. Both CI copies call the script directly.
+	./scripts/lint.sh
 
 .PHONY: install prove defects lint

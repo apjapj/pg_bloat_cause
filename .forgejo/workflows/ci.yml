@@ -63,7 +63,7 @@ jobs:
     runs-on: docker
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - name: Parse the workflow files, refusing a duplicated key
+      - name: every database-free check
         run: |
           # node:20-bookworm carries python3 but not PyYAML, and a plain `yaml.safe_load` accepts a
           # duplicate key silently and keeps the last one. That is how a duplicated env block shipped
@@ -74,11 +74,12 @@ jobs:
           # time. It is paid here because the alternative is a check that cannot run, and a check that
           # cannot run is the failure scripts/check-workflows.sh exists to prevent. If the mirror ever
           # becomes unreliable the fix is a PyYAML-bearing runner image, not removing the check.
+          #
+          # scripts/lint.sh, not the checks one by one: three of the six were only in `make lint`, so
+          # they never ran in CI. The script is the list, and it needs no PostgreSQL toolchain.
           apt-get update -q
           apt-get install -y -q --no-install-recommends python3-yaml
-          ./scripts/check-workflows.sh
-      - run: ./scripts/lint-docs.sh
-      - run: ./scenarios/check-evidence.sh
+          ./scripts/lint.sh
       - run: for s in scenarios/*.sh ci/*.sh scripts/*.sh; do bash -n "$s" || exit 1; done
 
   scenarios-14:
