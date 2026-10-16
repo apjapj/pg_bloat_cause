@@ -1,54 +1,78 @@
 #!/usr/bin/env bash
-# check-defects.sh <postgres major version>: re-inject each recorded defect and require the test
-# that first caught it to fail again.
+# check-defects.sh [--local|--container] [<postgres major version>]: re-inject each recorded defect
+# and require the test that first caught it to fail again.
 #
-# A bug fixed today can be reintroduced tomorrow, and nothing notices unless something puts it
-# back. Each defects/<id>.patch reverts one fix, and its .meta names the test that must fail while
-# the patch is applied. This runs every cell against the same server image CI uses and reports the
-# regression rate: of the defects the suite once caught, how many does it still catch.
+# A bug fixed today can be reintroduced tomorrow, and nothing notices unless something puts it back.
+# Each defects/<id>.patch reverts one fix, and its .meta names the test that must fail while the
+# patch is applied. Each cell runs the test on the pristine tree first (the control, which must pass)
+# and then on the patched tree (which must fail), and reports a regression rate.
 #
-# It is a mutation run, not a lint. It needs Docker and a server, so it is its own target
-# (`make defects`), not part of `make lint`, and it reuses ci/Dockerfile and install-extension.sh.
+# Two modes, one command. `make defects` picks the mode:
+#   --container  build ci/Dockerfile and run a throwaway server (needs Docker).
+#   --local      use the server already here, with the extension installed by `make install`; the
+#                Forgejo runner is itself a PostgreSQL and has no Docker, so it runs this way.
+# Auto (the default) chooses container when the docker CLI and daemon are there, else local.
 #
 # The three verdicts: caught, missed, could-not-run. A cell that cannot run is reported and is never
 # counted as caught, because a defect no mechanism could reach makes a miss mean nothing.
 set -uo pipefail
-v=${1:?usage: check-defects.sh <postgres major version>}
+
+mode=auto
+case "${1:-}" in
+    --local)     mode=local; shift ;;
+    --container) mode=container; shift ;;
+esac
+v=${1:-}
+case "$mode" in
+    container) [ -n "$v" ] || { echo "usage: check-defects.sh [--local|--container] <postgres major version>" >&2; exit 2; } ;;
+esac
 cd "$(dirname "$0")/.."
 
-# Preflight, the same two things ci/job.sh names: a daemon that is not answering fails later as
-# "failed to connect to the docker API", which names neither cause nor fix.
-if ! command -v docker >/dev/null 2>&1; then
-    echo "check-defects.sh: the docker CLI is not on PATH" >&2; exit 1
-fi
-if ! docker info >/dev/null 2>&1; then
-    echo "check-defects.sh: the docker daemon is not answering${DOCKER_HOST:+ (DOCKER_HOST=$DOCKER_HOST)}" >&2
-    exit 1
+if [ "$mode" = auto ]; then
+    if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then mode=container; else mode=local; fi
 fi
 
-image="bc-ci:$v"; port=57$v; c="bc-defects-$v"
-docker rm -f "$c" >/dev/null 2>&1
-docker build -q --build-arg PG_MAJOR="$v" -t "$image" ci/ >/dev/null || exit 1
-docker run -d --rm --name "$c" -p 127.0.0.1:$port:5432 -e POSTGRES_PASSWORD=test "$image" postgres >/dev/null || exit 1
-trap 'docker rm -f "$c" >/dev/null 2>&1' EXIT
-for _ in $(seq 1 60); do pg_isready -q -h 127.0.0.1 -p $port && break; sleep 1; done
-sleep 2
-export PGHOST=127.0.0.1 PGPORT=$port PGUSER=postgres PGPASSWORD=test PGDATABASE=postgres
-
-# The pristine extension, so a patch has something to overwrite and a restore has a target.
-./scenarios/install-extension.sh "$c" >/dev/null || exit 1
-extdir=$(docker exec "$c" sh -c 'pg_config --sharedir')/extension
 ext=$(basename "$(ls ./*.control 2>/dev/null | head -1)" .control)
+[ -n "$ext" ] || { echo "check-defects.sh: no .control file, so no extension to test" >&2; exit 1; }
+
+container=""; extdir=""
+if [ "$mode" = container ]; then
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "check-defects.sh --container: the docker CLI is not on PATH" >&2; exit 1
+    fi
+    if ! docker info >/dev/null 2>&1; then
+        echo "check-defects.sh --container: the docker daemon is not answering${DOCKER_HOST:+ (DOCKER_HOST=$DOCKER_HOST)}" >&2
+        exit 1
+    fi
+    image="bc-ci:$v"; port=57$v; container="bc-defects-$v"
+    docker rm -f "$container" >/dev/null 2>&1
+    docker build -q --build-arg PG_MAJOR="$v" -t "$image" ci/ >/dev/null || exit 1
+    docker run -d --rm --name "$container" -p 127.0.0.1:$port:5432 -e POSTGRES_PASSWORD=test "$image" postgres >/dev/null || exit 1
+    trap 'docker rm -f "$container" >/dev/null 2>&1' EXIT
+    for _ in $(seq 1 60); do pg_isready -q -h 127.0.0.1 -p $port && break; sleep 1; done
+    sleep 2
+    export PGHOST=127.0.0.1 PGPORT=$port PGUSER=postgres PGPASSWORD=test PGDATABASE=postgres
+    ./scenarios/install-extension.sh "$container" >/dev/null || exit 1
+    extdir=$(docker exec "$container" sh -c 'pg_config --sharedir')/extension
+    put() {
+        docker cp "$1" "$container:/tmp/bc-defect-$2" >/dev/null
+        docker exec -u root "$container" sh -c "cp /tmp/bc-defect-$2 \"$extdir/$2\""
+        docker exec -u root "$container" sh -c "rm -f /tmp/bc-defect-$2"
+    }
+else
+    command -v pg_config >/dev/null 2>&1 || { echo "check-defects.sh --local: pg_config is not on PATH" >&2; exit 1; }
+    extdir=$(pg_config --sharedir)/extension
+    if [ ! -e "$extdir/$ext.control" ]; then
+        echo "check-defects.sh --local: $ext is not installed in $extdir; run make install first" >&2
+        exit 1
+    fi
+    put() { cp "$1" "$extdir/$2"; }
+fi
+
 # Drop the extension before each run. A test that creates it outside a transaction leaves it
 # installed, and the next run's CREATE EXTENSION IF NOT EXISTS would then reuse the old objects
 # instead of reading the file that was just swapped, so the mutant would never load.
-drop_ext() { [ -n "$ext" ] && psql -qX -c "DROP EXTENSION IF EXISTS \"$ext\" CASCADE" >/dev/null 2>&1; }
-
-put() {
-    docker cp "$1" "$c:/tmp/bc-defect-$2" >/dev/null
-    docker exec -u root "$c" sh -c "cp /tmp/bc-defect-$2 \"$extdir/$2\""
-    docker exec -u root "$c" sh -c "rm -f /tmp/bc-defect-$2"
-}
+drop_ext() { psql -qX -c "DROP EXTENSION IF EXISTS \"$ext\" CASCADE" >/dev/null 2>&1; }
 
 total=0; caught=0; missed=0; norun=0; regressed=""
 for patch in defects/*.patch; do
@@ -62,10 +86,8 @@ for patch in defects/*.patch; do
     fi
     total=$((total+1))
 
+    # Control: the test must PASS on the pristine tree, or "caught" means nothing.
     drop_ext
-    # Control: the test must PASS on the pristine tree, or "caught" means nothing. Without it a test
-    # that fails for an unrelated reason reads as a caught defect. The tree is pristine here because
-    # every cell restores before returning.
     ctl=$(pg_prove --dbname postgres "$test" 2>&1); crc=$?
     if [ $crc -ne 0 ]; then
         echo "  $id: COULD-NOT-RUN (the control failed: $test does not pass on the clean tree)"
@@ -102,6 +124,6 @@ done
 
 den=$((caught+missed))
 echo
-echo "defects: $caught of $den caught, $missed missed, $norun could-not-run"
+echo "defects ($mode): $caught of $den caught, $missed missed, $norun could-not-run"
 [ "$missed" -eq 0 ] || { echo "regression:$regressed" >&2; exit 1; }
 exit 0

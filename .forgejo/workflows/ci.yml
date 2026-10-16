@@ -174,3 +174,22 @@ jobs:
             git diff -- "scenarios/evidence/*.pg18.txt"
             echo "EVIDENCE DIFFERS"; exit 1
           fi
+
+  # The same command as the GitHub copy runs. This runner is itself a PostgreSQL and has no Docker,
+  # so check-defects.sh runs --local: the extension is installed here by make install and swapped in
+  # place. scripts/check-ci-parity.sh holds the two jobs to the same command.
+  defects:
+    runs-on: babar-pg
+    env:
+      PGUSER: postgres
+      PGDATABASE: postgres
+      PGHOST: 127.0.0.1
+      PGPORT: "5432"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Start Postgres and install the extension
+        run: |
+          set -euo pipefail
+          pg-start
+          make install
+      - run: make defects PG=18

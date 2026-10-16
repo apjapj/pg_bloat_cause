@@ -52,3 +52,12 @@ jobs:
         # Strict: a difference in the masked evidence fails the job, like pgTAP and the scenario
         # assertions. See ci/README.md for why it started report-only and what the first run showed.
         run: ./ci/job.sh ${{ matrix.pg }}
+
+  # One command, the same in both copies: check-defects.sh picks container mode here (Docker is on
+  # this runner) and local mode on the Forgejo copy (its runner is a PostgreSQL and has no Docker).
+  # scripts/check-ci-parity.sh holds the two to it.
+  defects:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - run: make defects PG=18
