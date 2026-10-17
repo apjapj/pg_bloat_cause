@@ -13,7 +13,7 @@
 # Run scenarios/standby.sh <major> down to remove both.
 set -euo pipefail
 v=$1; net=bc-repl-$v; pri=bc-pri-$v; sby=bc-sby-$v
-if [ "${2:-}" = down ]; then docker rm -f "$pri" "$sby" >/dev/null 2>&1; docker network rm "$net" >/dev/null 2>&1; exit 0; fi
+if [ "${2:-}" = down ]; then docker rm -f -v "$pri" "$sby" >/dev/null 2>&1; docker network rm "$net" >/dev/null 2>&1; exit 0; fi
 pport=$2; sport=$3
 # The image defaults to the local pg-dev-infra one; CI passes BC_IMAGE, built from ci/Dockerfile.
 image=${BC_IMAGE:-pg-dev-infra-pg$v}

@@ -45,10 +45,10 @@ if [ "$mode" = container ]; then
         exit 1
     fi
     image="bc-ci:$v"; port=57$v; container="bc-defects-$v"
-    docker rm -f "$container" >/dev/null 2>&1
+    docker rm -f -v "$container" >/dev/null 2>&1
     docker build -q --build-arg PG_MAJOR="$v" -t "$image" ci/ >/dev/null || exit 1
     docker run -d --rm --name "$container" -p 127.0.0.1:$port:5432 -e POSTGRES_PASSWORD=test "$image" postgres >/dev/null || exit 1
-    trap 'docker rm -f "$container" >/dev/null 2>&1' EXIT
+    trap 'docker rm -f -v "$container" >/dev/null 2>&1' EXIT
     for _ in $(seq 1 60); do pg_isready -q -h 127.0.0.1 -p $port && break; sleep 1; done
     sleep 2
     export PGHOST=127.0.0.1 PGPORT=$port PGUSER=postgres PGPASSWORD=test PGDATABASE=postgres
