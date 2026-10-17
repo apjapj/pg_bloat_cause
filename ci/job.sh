@@ -84,4 +84,20 @@ else
     fi
 fi
 
+step "scenarios with pgstattuple never installed"
+# Step 6's sampler reads the estimate and must not need pgstattuple, so the suite has to pass where
+# it is absent. Remove it from both servers and run the scenarios again: the measured cross-check
+# reports itself as not established, and every assertion must still hold. This is the with-and-without
+# branch made real. The evidence differs from the committed set by design (the measured lines are
+# gone), so this run writes it to a scratch directory and nothing here is compared to a committed file.
+for c in "bc-pri-$v" "bc-sby-$v"; do
+    docker exec -u root "$c" sh -c 'rm -f "$(pg_config --sharedir)"/extension/pgstattuple* "$(pg_config --pkglibdir)"/pgstattuple.so' 2>/dev/null || true
+done
+absent=$(psql -X -At -c "SELECT count(*) FROM pg_available_extensions WHERE name = 'pgstattuple'")
+echo "  pgstattuple available: ${absent} (0 is the state this leg claims to test)"
+[ "$absent" = "0" ] || { echo "  FAIL  pgstattuple is still available, so this leg proves nothing"; fail=1; }
+out2=$(BC_CONTAINER="bc-pri-$v" BC_STANDBY_PORT=$sport EVIDENCE_DIR=$(mktemp -d) scenarios/run.sh)
+printf '%s\n' "$out2"
+if grep -qE 'FAILED' <<<"$out2"; then fail=1; fi
+
 exit $fail
