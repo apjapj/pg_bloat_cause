@@ -155,7 +155,8 @@ prepared transaction, no row at all for a standby holder. See [docs/ranking.md](
 `bloat_cause_sample()`, a history table, `bloat_cause_notify()` and `bloat_cause_notify_resolved()`,
 following the shared contract. Reuse pg_lock_tree's lessons from its own docs: compare escalation
 against the last notification rather than the last sample, keep samples as separate statements, and
-redact query text from horizon holders before storing it.
+redact query text from horizon holders before storing it. The contract is settled in
+[docs/detect.md](docs/detect.md), written before the SQL the way `docs/measure.md` was.
 
 ### 7. Docs, grants and the matrix
 
