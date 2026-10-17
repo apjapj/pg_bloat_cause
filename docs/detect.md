@@ -6,7 +6,8 @@ for `bloat_cause_measure()`. The shared contract in `pg_incident_watch` is the a
 payload; this document is the authority for what bloat_cause samples and when it notifies.
 
 The three decisions this document first left open have since been settled in review; they are marked
-**[review]** below. Nothing here is built yet, and the merge is Piotr's.
+**[review]** below. The last one, the escalation's size rungs, is settled too, marked **[settled]**.
+Nothing here is built yet, and the merge is Piotr's.
 
 ## What it will be
 
@@ -20,8 +21,8 @@ bloat_cause_prune(older_than interval DEFAULT interval '35 days')
   RETURNS bigint
 
 bloat_cause_notify(channel text DEFAULT 'bloat_cause',
-                   min_dead_pct numeric DEFAULT 0.2,
-                   min_dead_bytes bigint DEFAULT 104857600,   -- 100 MB
+                   min_dead_pct numeric DEFAULT 0.1,
+                   min_dead_bytes bigint DEFAULT 104857600,   -- 100 MB, the first rung
                    min_holder_age interval DEFAULT interval '1 minute')
   RETURNS bigint
 
@@ -84,13 +85,12 @@ rule and `pg_lock_tree`'s hard-won one: a quantity that only grows makes the pre
 comparison true on every sample. The state table is `bloat_cause_alert`, one row per subject per
 channel, holding the severity last notified.
 
-**The metric is `dead_bytes`, gated on both floors, with `dead_pct` shown.** **[review]** A table's
+**The metric is `dead_bytes`, gated on both floors, with `dead_pct` shown.** **[settled]** A table's
 bloat is a state, not a date, so it has no natural halving; it needs a size ladder. `dead_bytes` is
 what "slowing down" costs and what VACUUM will have to do, and a percentage alone alerts on a 40-row
 table that is 60% dead. A level fires only when the table is **both** at least `min_dead_pct` dead
 **and** at least `min_dead_bytes` of dead space, so a huge table at 2% and a tiny table at 60% each
-stay quiet. The ladder is a size ladder (proposal: 100 MB, 1 GB, 10 GB), and the payload carries
-`dead_pct` beside `dead_bytes` so a reader sees both. The rungs are still an open question below.
+stay quiet. The payload carries `dead_pct` beside `dead_bytes` so a reader sees both.
 
 **The holder is a `then:` line, not its own subject.** **[review]** A long transaction holding back
 VACUUM is the cause of the bloat, and `bloat_cause_holder()` already reports it. Keeping the table as
@@ -117,13 +117,18 @@ of a row.
 
 | rung | a notification fires when dead_bytes first reaches |
 |---|---|
-| onset | `min_dead_bytes`, with `dead_pct` at or above `min_dead_pct` |
+| onset | 100 MB (`min_dead_bytes`), with `dead_pct` at or above `min_dead_pct` (10%) |
 | escalate | 1 GB |
 | escalate | 10 GB |
+| escalate | 100 GB |
+| escalate | 1 TB |
+| escalate | and on, by factors of ten, with no fixed top |
 
 and the rungs are compared against the highest already notified, never the previous sample, so a
-large table that sits still notifies once. The rungs are the open question this asks the reviewer to
-confirm; the shape (a size ladder, gated on both floors, escalating only upward) is settled.
+large table that sits still notifies once. **[settled] The ladder multiplies by ten and has no top**:
+a fixed cap would go silent for a table that went on to lose 500 GB. `min_dead_bytes` (100 MB) and
+`min_dead_pct` (10%) are both arguments, so a small system or a fixture can lower the first rung
+without changing the ladder above it.
 
 ## The order of work, and why it is that order
 
@@ -171,11 +176,13 @@ password must not contain the verifier. Assert the stored text, not a boolean th
 - `dead_rows_source` stays `'estimated'` on every row the view and the sampler report.
 - Version: this is `0.4.0`, a new release script and a new update path, not an edit to `0.3.1`.
 
-## The one question still open
+## The decisions, now settled
 
-**The size rungs** (proposed 100 MB, 1 GB, 10 GB) and whether `min_dead_bytes`'s default should be the
-first rung rather than a separate value, so the floor and the onset are the same number and cannot
-disagree.
+- **The size rungs** are settled: ten-times steps with **no top**, and `min_dead_bytes`'s default
+  (100 MB) **is** the first rung, so the floor and the onset are the same number and cannot disagree.
+  See the escalation table above.
+- The first draft's other two open decisions, the metric and the holder, were settled earlier and are
+  marked **[review]** in the text.
 
 ## The next concrete step
 
