@@ -42,7 +42,11 @@ note() { printf '  %s\n' "$1"; }
 skip() { printf '\n  SKIP  %s\n' "$1"; exit 3; }
 
 setup_schema() {
-    psql_q -c "CREATE SCHEMA IF NOT EXISTS $SCHEMA" -c "CREATE EXTENSION IF NOT EXISTS pgstattuple"
+    psql_q -c "CREATE SCHEMA IF NOT EXISTS $SCHEMA"
+    # pgstattuple is a cross-check the scenarios use, not a dependency of the extension. Create it
+    # only when the cluster has it, so the suite runs on a cluster that never installed it; the
+    # measured cross-check then reports itself as not established instead of failing.
+    if has_pgstattuple; then psql_q -c "CREATE EXTENSION IF NOT EXISTS pgstattuple"; fi
 }
 
 # Cumulative statistics are flushed asynchronously: by the stats collector on 14, and by each backend
@@ -118,6 +122,10 @@ SELECT relname, n_live_tup, n_dead_tup,
 # Measured rather than estimated: pgstattuple reads the whole table. Fine on a fixture.
 measured() {
     say "measured (pgstattuple)"
+    if ! has_pgstattuple; then
+        note "  pgstattuple is not available on this server, so the measured cross-check is not established"
+        return 0
+    fi
     local t
     for t in ${1//,/ }; do
         psql -X -At -F' ' -c "
@@ -147,6 +155,9 @@ expected() { say "expected cause"; note "$1"; }
 # report the scenario as FAILED.
 has_extension() {
     [ "$(val "SELECT count(*) FROM pg_available_extensions WHERE name = 'pg_bloat_cause'")" = 1 ]
+}
+has_pgstattuple() {
+    [ "$(val "SELECT count(*) FROM pg_available_extensions WHERE name = 'pgstattuple'")" = 1 ]
 }
 finding() {   # $1 table
     has_extension || { note "pg_bloat_cause is not installed on this server; finding not checked"; return 0; }
