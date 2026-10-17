@@ -2,22 +2,26 @@
 
 **Status: not implemented.** This is the plan for step 6 of `README.md`, written before the SQL so
 the next session starts from decisions rather than questions, the way `docs/measure.md` was written
-for `bloat_cause_measure()`. The shared contract in `pg_incident_watch` is the contract this implements and
-is the authority for the payload; this document is the authority for what bloat_cause samples and
-when it notifies.
+for `bloat_cause_measure()`. The shared contract in `pg_incident_watch` is the authority for the
+payload; this document is the authority for what bloat_cause samples and when it notifies.
+
+The three decisions this document first left open have since been settled in review; they are marked
+**[review]** below. Nothing here is built yet, and the merge is Piotr's.
 
 ## What it will be
 
 ```
-bloat_cause_sample(sampled_at timestamptz DEFAULT NULL)
-  RETURNS TABLE (kind text, sampled int, below_threshold int, not_established int)
+bloat_cause_sample(min_dead_pct numeric DEFAULT 0.1,
+                   min_dead_bytes bigint DEFAULT 0,
+                   sampled_at timestamptz DEFAULT NULL)
+  RETURNS TABLE (kind text, sampled int, below_floor int, not_established int)
 
 bloat_cause_prune(older_than interval DEFAULT interval '35 days')
   RETURNS bigint
 
 bloat_cause_notify(channel text DEFAULT 'bloat_cause',
                    min_dead_pct numeric DEFAULT 0.2,
-                   min_dead_bytes bigint DEFAULT 104857600,   -- 100 MB, first proposal
+                   min_dead_bytes bigint DEFAULT 104857600,   -- 100 MB
                    min_holder_age interval DEFAULT interval '1 minute')
   RETURNS bigint
 
@@ -29,24 +33,26 @@ and a history table:
 
 ```
 bloat_cause_history (
-  sampled_at  timestamptz,
-  schemaname  name,
-  relname     name,
-  dead_rows   bigint,
-  dead_pct    numeric,
-  dead_bytes  bigint,
-  held_by_xid bigint,          -- the horizon holder's xid, or NULL
-  holder_age  interval,        -- how long that holder has run, or NULL
-  holder_query text,           -- already redacted, or NULL
+  sampled_at     timestamptz,
+  schemaname     name,
+  relname        name,
+  dead_rows      bigint,
+  dead_pct       numeric,
+  dead_bytes     bigint,
+  dead_rows_source text,        -- always 'estimated': the sample never measures
+  holder_pid     int,           -- the horizon holder, or NULL
+  holder_xid_age interval,      -- how long that transaction has run, or NULL
+  holder_slot    text,          -- the replication slot, when a slot is the holder, or NULL
+  holder_query   text,          -- NULL unless text storage is opted in and redacted
   PRIMARY KEY (schemaname, relname, sampled_at)
 )
 ```
 
 ## Settled decisions
 
-**The subject is the table, and it is schema-qualified.** The shared contract fixes the bloat subject as the
-relation name, not the OID, because a listener reading a log a week later cannot resolve an OID. It
-is `format('%I.%I', schemaname, relname)`, the same identity `bloat_cause_findings()` prints.
+**The subject is the table, and it is schema-qualified.** The shared contract fixes the bloat subject
+as the relation name, not the OID, because a listener reading a log a week later cannot resolve an
+OID. It is `format('%I.%I', schemaname, relname)`, the same identity `bloat_cause_findings()` prints.
 
 **The sample is the estimate, and it never measures.** It reads `bloat_cause_findings()`, which is
 `pg_stat_user_tables` and the catalog, and writes `dead_rows_source = 'estimated'`. It does **not**
@@ -54,15 +60,20 @@ call `bloat_cause_measure()`: that reads the heap, and `docs/measure.md`'s whole
 whole-table read happens only when a caller asks for one table. A sampler that measured would be the
 implicit whole-database read the contract forbids.
 
-**Only tables worth a row are sampled.** A table at or above a floor (default 10% estimated dead,
-the same shape as `pg_limit_runway`'s `sample_min_used`) is sampled, **and** any table already in the
-history is sampled even below the floor, so a series that starts does not silently stop. This is the
-lesson `pg_limit_runway`'s sampler records: a series pulled down by a quiet sample cannot be trusted.
+**Every stored row and every payload says the numbers are estimates.** `dead_rows_source` is carried
+in the history row and in the payload, so a reader never has to guess whether a figure came from a
+table read. **[review]**
+
+**Only tables worth a row are sampled, and the floor is a function argument.** A table at or above
+`min_dead_pct` (default 10%) **and** `min_dead_bytes` (default 0) is sampled, **and** any table
+already in the history is sampled even below the floor, so a series that starts does not silently
+stop. The floors are **arguments with defaults, not a GUC**: these extensions are pure SQL with no
+configuration of their own, and `sampled_at` is already an argument, so a GUC would add global state
+the history table cannot reproduce. **[review]**
 
 **Samples are one statement each, and `sampled_at` is an argument.** The row count a sample writes is
 bounded by the number of tables above the floor, and a caller passing `sampled_at` is laying a
-fixture, exactly as `pg_limit_runway`'s `limit_runway_sample()` does. Schedule it, do not call it in a
-loop inside one statement.
+fixture, exactly as `pg_limit_runway`'s `limit_runway_sample()` does.
 
 **The history is the user's data.** It is registered with `pg_dump` through `pg_extension_config_dump`,
 as `limit_runway_history` and `lock_tree_history` are, because a series is what makes a trend readable
@@ -73,35 +84,46 @@ rule and `pg_lock_tree`'s hard-won one: a quantity that only grows makes the pre
 comparison true on every sample. The state table is `bloat_cause_alert`, one row per subject per
 channel, holding the severity last notified.
 
-**Redaction is `pg_lock_tree`'s, and it happens before storage.** When the holder's query text is
-stored in `holder_query`, it is redacted with the same rules `pg_lock_tree` uses (the
-`SCRAM-SHA-256$4096:<salt>$<StoredKey>:<ServerKey>` shape included), so a stored sample never holds a
-live credential.
+**The metric is `dead_bytes`, gated on both floors, with `dead_pct` shown.** **[review]** A table's
+bloat is a state, not a date, so it has no natural halving; it needs a size ladder. `dead_bytes` is
+what "slowing down" costs and what VACUUM will have to do, and a percentage alone alerts on a 40-row
+table that is 60% dead. A level fires only when the table is **both** at least `min_dead_pct` dead
+**and** at least `min_dead_bytes` of dead space, so a huge table at 2% and a tiny table at 60% each
+stay quiet. The ladder is a size ladder (proposal: 100 MB, 1 GB, 10 GB), and the payload carries
+`dead_pct` beside `dead_bytes` so a reader sees both. The rungs are still an open question below.
 
-## The escalation, which is the part to decide
+**The holder is a `then:` line, not its own subject.** **[review]** A long transaction holding back
+VACUUM is the cause of the bloat, and `bloat_cause_holder()` already reports it. Keeping the table as
+the subject means a listener's deduplication key does not change identity when the holder changes.
 
-A table's bloat is a **state**, not a date, so it does not halve like `pg_limit_runway`'s window and
-it does not double like `pg_lock_tree`'s wait. It has to be given a rising ladder, and the metric is
-the open decision:
+**Stored holder context is pid, transaction age and slot name, not query text.** **[review]** Query
+text is stored only through an explicit opt-in, and redacted (with `pg_lock_tree`'s rules, the
+`SCRAM-SHA-256$4096:<salt>$<StoredKey>:<ServerKey>` shape included) when it is. A redaction step that
+must work on every sample is weaker than not storing the text at all.
 
-- **`dead_pct`** is what a dashboard shows, and it is what "how full of dead rows is this table" means.
-  But a 40-row table that is 60% dead is not slowing anything, so a percentage alone alerts on trivia.
-- **`dead_bytes`** is the work VACUUM will have to do and the space held, so it is what "slowing down"
-  costs. A tiny-but-mostly-dead table is correctly ignored. Its floor is a size, which has to be chosen
-  and is database-dependent.
+**A statistics reset is unknown, not resolved.** **[review]** `n_dead_tup` is reset by a crash or by
+`pg_stat_reset()`. Without a guard the next sample reads as a drop to zero and would be reported as
+"cleared" when it is really "unknown". The sample compares the statistics reset time, and a sample
+taken across a reset is recorded with `dead_rows_source` and treated as unknown by the sender rather
+than as a cleared table.
 
-**Proposed: both, with `dead_bytes` as the escalation metric and `dead_pct` shown in the payload.** A
-table alerts when its `dead_bytes` crosses the ladder and it is at least `min_dead_pct` dead, so a big
-table with a little dead space and a small table that is mostly dead both stay quiet, and a big table
-that is mostly dead is the case that fires. The ladder is a size ladder rather than a percentage one,
-because the quantity that grows is bytes. The exact rungs are an open question below.
+**A table leaving the sampled set is no longer watched, not cleared.** **[review]** A table that
+drops below the floor stops being sampled; that must not send a "resolved". `bloat_cause_notify_resolved()`
+clears a subject only when a table is still watched and is now below the alert threshold. The two
+cases are distinguished by whether the table is present in the current findings, not by the absence
+of a row.
 
-The **holder** is the second thing worth saying, and whether it alerts is a decision. A long
-transaction holding back VACUUM is the *cause* of the bloat, and `bloat_cause_holder()` already
-reports it. A holder that has run past `min_holder_age` while a table's bloat is climbing is the case
-an operator wants at 3am. It could be a `then:` line in the table's payload rather than its own
-subject, which keeps the subject rule intact; or it could be its own alert. Proposed: a `then:` line,
-so the table stays the subject and a listener's deduplication key does not change identity.
+## The escalation, in full
+
+| rung | a notification fires when dead_bytes first reaches |
+|---|---|
+| onset | `min_dead_bytes`, with `dead_pct` at or above `min_dead_pct` |
+| escalate | 1 GB |
+| escalate | 10 GB |
+
+and the rungs are compared against the highest already notified, never the previous sample, so a
+large table that sits still notifies once. The rungs are the open question this asks the reviewer to
+confirm; the shape (a size ladder, gated on both floors, escalating only upward) is settled.
 
 ## The order of work, and why it is that order
 
@@ -109,9 +131,8 @@ so the table stays the subject and a listener's deduplication key does not chang
    the suite runs **with** `pgstattuple` only, because the scenario library creates it
    unconditionally. The sampler must not need it, so before the sampler exists the suite has to be
    able to run without it, and the matrix leg that does so has to be real. This goes first inside step
-   6, not after it, so the estimate path is tested on a cluster that never had `pgstattuple`.
-2. **`bloat_cause_sample()`, the history table and `bloat_cause_prune()`.** The series is the
-   foundation the escalation reads.
+   6, so the estimate path is tested on a cluster that never had `pgstattuple`.
+2. **`bloat_cause_sample()`, the history table and `bloat_cause_prune()`.**
 3. **`bloat_cause_notify()` and `bloat_cause_notify_resolved()`**, with `bloat_cause_alert`.
 4. **The documents**, if and only if the implementation shows a sentence needs amending.
 5. **`INSTALL.md` grants** for the history table and the sender.
@@ -122,19 +143,24 @@ Building the harness before the thing it tests is what this repository learned t
 
 ## Verification, and the paths that will actually find faults
 
-**With `pgstattuple` and without it.** The without case is the new matrix leg, and it is meaningful
-precisely because the sampler must not depend on it.
+**With `pgstattuple` and without it.** The without case is the new matrix leg, meaningful precisely
+because the sampler must not depend on it.
 
-**An unprivileged role.** The sampler reads `pg_stat_user_tables`, which any role can read for its
-own tables; a role granted only the sampler must not see another role's tables. This is the path that
+**An unprivileged role.** The sampler reads `pg_stat_user_tables`, which a role sees only for its own
+tables; a role granted only the sampler must not see another role's tables. This is the path that
 found the `findings()` and `measure()` defects, and reading the SQL found neither.
 
 **A rising series, not a single sample.** The escalation test plants two or three samples whose
 `dead_bytes` cross a rung, calls `notify()`, and asserts one notification per rung, then the silence
 at the same rung. The silence half is the one a notify-on-every-sample function fails.
 
-**The redaction.** A stored `holder_query` for a role holding a `SCRAM-SHA-256` password must not
-contain the verifier. Assert the stored text, not a boolean that says it is redacted.
+**A statistics reset.** `pg_stat_reset()`, then a sample, must be recorded as unknown and must not
+clear a standing alert.
+
+**A table falling below the floor.** It must stop being sampled and must not send a "resolved".
+
+**The redaction, when text is opted in.** A stored `holder_query` for a role holding a `SCRAM-SHA-256`
+password must not contain the verifier. Assert the stored text, not a boolean that says it is redacted.
 
 ## What must not change
 
@@ -145,18 +171,16 @@ contain the verifier. Assert the stored text, not a boolean that says it is reda
 - `dead_rows_source` stays `'estimated'` on every row the view and the sampler report.
 - Version: this is `0.4.0`, a new release script and a new update path, not an edit to `0.3.1`.
 
-## The open questions this asks the reviewer to settle
+## The one question still open
 
-1. **The escalation metric and its ladder**: `dead_bytes` as proposed, with `dead_pct` shown, and
-   what the rungs are (proposal: 100 MB, 1 GB, 10 GB, doubling-ish, plus the `min_dead_pct` gate), or
-   `dead_pct` alone.
-2. **The holder**: a `then:` line on the table's alert, as proposed, or its own subject.
-3. **The floor for sampling** (default 10% as proposed) and whether it is a GUC (`bloat_cause.sample_min_dead_pct`).
+**The size rungs** (proposed 100 MB, 1 GB, 10 GB) and whether `min_dead_bytes`'s default should be the
+first rung rather than a separate value, so the floor and the onset are the same number and cannot
+disagree.
 
 ## The next concrete step
 
-Write the red tests against the contract: the sampler writes one row per table above the floor and
-writes nothing for a table below it that is not already in the series; `notify()` fires once per rung
-and is silent at the same rung; `notify_resolved()` clears once. Then add the function to make them
-pass. Before any of that, the `pgstattuple`-free matrix leg exists, so step 1 of the order above is
-already done when the sampler is written.
+Write the red tests against the contract: the sampler writes one row per table above the floors and
+none for a table below them that is not already in the series; a sample across a statistics reset is
+unknown, not a clear; `notify()` fires once per rung and is silent at the same rung; a table dropping
+below the floor stops being watched without a clear. Then add the function to make them pass, after
+the `pgstattuple`-free matrix leg exists.
