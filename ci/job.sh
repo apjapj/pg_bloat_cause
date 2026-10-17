@@ -88,6 +88,6 @@ fi
 step "docker footprint"
 # The smoke alarm for the anonymous-volume leak the removal paths fix at source: a host that
 # accumulates dangling volumes fails here rather than filling its disk. Deletes nothing.
-scripts/docker-guard.sh check || fail=1
+bash scripts/docker-guard.sh check || fail=1
 
 exit $fail
