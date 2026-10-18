@@ -302,10 +302,12 @@ SELECT is(bloat_cause_age(interval '3 days 4 hours'), '3 days', 'ages of two day
             (SELECT count(*)::int FROM bloat_cause_command() WHERE cause = 'autovacuum disabled'),
             'every autovacuum-disabled row returns a SELECT, and it is never empty');
   -- A returned statement must never contain an unbalanced quote, which is what splicing a gid would
-  -- cause. Counting quotes is crude but it is the property that matters and it needs no fixture.
+  -- cause. Counting quotes is crude but it is the property that matters and it needs no fixture. It
+  -- asserts an EVEN count, not a minimum: a statement with no quotes at all (VACUUM (VERBOSE)
+  -- schema.table) is balanced, and the earlier "< 2" clause failed on it whenever any table in the
+  -- database had the "autovacuum behind" cause, which the fixture does not but a leftover table can.
   SELECT is((SELECT count(*)::int FROM bloat_cause_command()
-              WHERE length(command) - length(replace(command, '''', '')) < 2
-                 OR length(command) - length(replace(command, '''', '')) % 2 <> 0),
+              WHERE length(command) - length(replace(command, '''', '')) % 2 <> 0),
             0, 'every returned statement has balanced single quotes');
   -- And the row count must equal the finding count, so the command never invents or drops a table.
   SELECT is((SELECT count(*)::int FROM bloat_cause_command()),
