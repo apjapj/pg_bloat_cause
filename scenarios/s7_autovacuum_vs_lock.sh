@@ -38,9 +38,17 @@ sleep $((naptime * 4))
 settle_stats
 usual_query s7_orders
 say "evidence, part 1: autovacuum workers on this table right now (expected: none)"
+# Filtered to the worker on THIS table, for the same reason part 2 is: the bare
+# backend_type = 'autovacuum worker' selected every worker in the cluster, so a transient worker on
+# an unrelated table added a row and failed the strict evidence comparison once in CI before passing
+# identically on a rerun. The fact this part asserts is that an ordinary autovacuum skips s7_orders,
+# so a worker anywhere else is noise; filtering it out keeps the assertion and makes the capture
+# deterministic.
 psql -X -P pager=off -c "
 SELECT pid, backend_type, wait_event_type, wait_event, left(query, 70) AS query
-  FROM pg_stat_activity WHERE backend_type = 'autovacuum worker'"
+  FROM pg_stat_activity
+ WHERE backend_type = 'autovacuum worker'
+   AND query LIKE '%s7_orders%'"
 say "evidence, part 1: the server log, if this is one of the scenario containers"
 # Two ways to reach it, because the two CI platforms hold the log in different places. BC_CONTAINER
 # names the scenario container and `docker logs --since` reads it, which is how ci/job.sh runs it. On
