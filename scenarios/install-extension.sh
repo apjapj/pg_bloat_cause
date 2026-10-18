@@ -7,7 +7,7 @@
 # an md5 of every destination compared with its source, a mismatch being a failed install.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-FILES="pg_bloat_cause.control pg_bloat_cause--0.1.sql pg_bloat_cause--0.2.sql pg_bloat_cause--0.3.sql pg_bloat_cause--0.3.1.sql pg_bloat_cause--0.1--0.2.sql pg_bloat_cause--0.2--0.3.sql pg_bloat_cause--0.3--0.3.1.sql"
+FILES="pg_bloat_cause.control pg_bloat_cause--0.1.sql pg_bloat_cause--0.2.sql pg_bloat_cause--0.3.sql pg_bloat_cause--0.3.1.sql pg_bloat_cause--0.4.0.sql pg_bloat_cause--0.1--0.2.sql pg_bloat_cause--0.2--0.3.sql pg_bloat_cause--0.3--0.3.1.sql pg_bloat_cause--0.3.1--0.4.0.sql"
 for c in "$@"; do
     for f in $FILES; do
         want=$(md5sum "$f" | cut -d' ' -f1)

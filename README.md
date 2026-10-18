@@ -6,7 +6,7 @@
 **What's slowing down.** Bloat is a symptom; this tool names the cause.
 
 Part of [pg_incident_watch](https://github.com/apjapj/pg_incident_watch). Pure SQL, `CREATE EXTENSION pg_bloat_cause`, no
-restart, no `shared_preload_libraries`. Status: **0.3.1**, tagged `v0.3.1`, built and tested on
+restart, no `shared_preload_libraries`. Status: **0.4.0**, tagged `v0.4.0`, built and tested on
 PostgreSQL 14 and 18. Install and grants: [INSTALL.md](INSTALL.md). What changed in each
 release: [CHANGELOG.md](CHANGELOG.md). Changing it or releasing it:
 [CONTRIBUTING.md](CONTRIBUTING.md).
@@ -150,12 +150,13 @@ Shipped as `bloat_cause_command()`: one row per table, the primary cause only, w
 the statement. `pg_cancel_backend()` rather than `pg_terminate_backend()`, `ROLLBACK PREPARED` for a
 prepared transaction, no row at all for a standby holder. See [docs/ranking.md](docs/ranking.md) rule 3.
 
-### 6. Review and detect
+### 6. ~~Review and detect~~ **Done: 0.4.0, [docs/detect.md](docs/detect.md)**
 
-`bloat_cause_sample()`, a history table, `bloat_cause_notify()` and `bloat_cause_notify_resolved()`,
-following the shared contract. Reuse pg_lock_tree's lessons from its own docs: compare escalation
-against the last notification rather than the last sample, keep samples as separate statements, and
-redact query text from horizon holders before storing it. The contract is settled in
+`bloat_cause_sample()`, `bloat_cause_history`, `bloat_cause_prune()`, `bloat_cause_notify()`,
+`bloat_cause_notify_resolved()` and `bloat_cause_alert`, following the shared contract. It reuses
+pg_lock_tree's lessons from its own docs: compare escalation against the last notification rather
+than the last sample, keep samples as separate statements, and never store query text that would
+have to be redacted on every sample. The contract is settled in
 [docs/detect.md](docs/detect.md), written before the SQL the way `docs/measure.md` was.
 
 ### 7. Docs, grants and the matrix
@@ -168,16 +169,10 @@ Done: [INSTALL.md](INSTALL.md), [docs/reference.md](docs/reference.md), and the 
 14 to 18** on every push. 19 is deliberately not in it: its image needs the `include` form and a separate
 apt major, as pg_lock_tree's workflow does it. That is an open item rather than a done one.
 
-Two things are not done, and saying what they actually are matters more than marking the step
-complete, because the first was written up wrongly once already.
-
-The tests run **with** `pgstattuple` only, and the scenario library creates it unconditionally, so
-the suite does not run on a cluster without it. That is a gap in the harness, not in the extension:
-`pgstattuple` is a cross-check the scenarios use to confirm the statistics, and the extension itself
-never calls it. There is no measured path to exercise, because `dead_rows_source` is always
-`estimated` in 0.2. The with-or-without matrix becomes a real test when the explicit measuring
-function that [INSTALL.md](INSTALL.md) mentions is added, and it belongs with that work rather than
-before it, since before it there is no branch that could differ.
+The with-and-without-`pgstattuple` matrix leg was the gap here, and step 6 closed it: `ci/job.sh`
+removes `pgstattuple` from both servers after the first scenario pass and runs the scenarios again,
+so the estimate path is exercised on a cluster that never had it. The sampler never measures and
+never needs it.
 
 The `pg_lock_tree` interaction was written up here as a real gap, and checking it showed the gap is
 not coverage at all. This extension never references `pg_lock_tree`: no `pg_extension` lookup, no

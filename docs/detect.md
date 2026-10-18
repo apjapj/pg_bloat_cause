@@ -1,13 +1,26 @@
 # detect: the sampler, the history, and the alerting, settled before any code
 
-**Status: not implemented.** This is the plan for step 6 of `README.md`, written before the SQL so
-the next session starts from decisions rather than questions, the way `docs/measure.md` was written
-for `bloat_cause_measure()`. The shared contract in `pg_incident_watch` is the authority for the
-payload; this document is the authority for what bloat_cause samples and when it notifies.
+**Status: implemented.** Shipped in 0.4.0 as `bloat_cause_sample()`, `bloat_cause_history`,
+`bloat_cause_prune()`, `bloat_cause_notify()`, `bloat_cause_notify_resolved()` and
+`bloat_cause_alert`, with the pgTAP suite in `test/02_history.sql` and `test/03_detect.sql`. This is
+the plan for step 6 of `README.md`, written before the SQL so the next session started from decisions
+rather than questions, the way `docs/measure.md` was written for `bloat_cause_measure()`. The shared
+contract in `pg_incident_watch` is the authority for the payload; this document is the authority for
+what bloat_cause samples and when it notifies.
 
 The three decisions this document first left open have since been settled in review; they are marked
 **[review]** below. The last one, the escalation's size rungs, is settled too, marked **[settled]**.
-Nothing here is built yet, and the merge is Piotr's.
+
+Two points are worth recording as built rather than as planned. The stats-reset guard compares
+`pg_stat_get_db_stat_reset_time()` against the subject's previous sample, so a sample taken across a
+reset is written with `dead_rows_source = 'unknown'` and null figures; a sample with figures is
+`'estimated'` as everywhere else, which is the one reading of "still estimated" that lets a reset be
+distinguishable. And the sampler filters to tables the calling role can read, because PostgreSQL's
+statistics views are not filtered by privilege the way `pg_stat_activity` is: without that filter a
+role granted only the sampler would read another role's tables into the shared history, which the
+Verification section below requires it not to. `holder_query` is always NULL in 0.4.0: storing query
+text needs an explicit opt-in and this release ships none, so the column exists and stays empty
+rather than holding text that would have to be redacted on every sample.
 
 ## What it will be
 
@@ -40,7 +53,7 @@ bloat_cause_history (
   dead_rows      bigint,
   dead_pct       numeric,
   dead_bytes     bigint,
-  dead_rows_source text,        -- always 'estimated': the sample never measures
+  dead_rows_source text,        -- 'estimated' normally; 'unknown' across a statistics reset
   holder_pid     int,           -- the horizon holder, or NULL
   holder_xid_age interval,      -- how long that transaction has run, or NULL
   holder_slot    text,          -- the replication slot, when a slot is the holder, or NULL
@@ -132,11 +145,12 @@ without changing the ladder above it.
 
 ## The order of work, and why it is that order
 
-1. **The harness change first: the with-and-without-`pgstattuple` matrix.** `README.md` step 7 says
-   the suite runs **with** `pgstattuple` only, because the scenario library creates it
-   unconditionally. The sampler must not need it, so before the sampler exists the suite has to be
-   able to run without it, and the matrix leg that does so has to be real. This goes first inside step
-   6, so the estimate path is tested on a cluster that never had `pgstattuple`.
+1. **The harness change first: the with-and-without-`pgstattuple` matrix.** **Done before the
+   sampler.** `README.md` step 7 said the suite runs **with** `pgstattuple` only, because the
+   scenario library creates it unconditionally. The sampler must not need it, so before the sampler
+   existed the suite had to be able to run without it, and the matrix leg that does so is real
+   (`ci/job.sh` builds the primary, runs the suite, removes `pgstattuple` from both servers and runs
+   the scenarios again). The estimate path is tested on a cluster that never had `pgstattuple`.
 2. **`bloat_cause_sample()`, the history table and `bloat_cause_prune()`.**
 3. **`bloat_cause_notify()` and `bloat_cause_notify_resolved()`**, with `bloat_cause_alert`.
 4. **The documents**, if and only if the implementation shows a sentence needs amending.
@@ -151,9 +165,12 @@ Building the harness before the thing it tests is what this repository learned t
 **With `pgstattuple` and without it.** The without case is the new matrix leg, meaningful precisely
 because the sampler must not depend on it.
 
-**An unprivileged role.** The sampler reads `pg_stat_user_tables`, which a role sees only for its own
-tables; a role granted only the sampler must not see another role's tables. This is the path that
-found the `findings()` and `measure()` defects, and reading the SQL found neither.
+**An unprivileged role.** The sampler reads `pg_stat_user_tables`, which PostgreSQL does **not**
+filter by privilege the way it filters `pg_stat_activity`, so a role granted only the sampler would
+otherwise read another role's tables into the shared history. The sampler filters to the tables the
+caller can read, and `test/02_history.sql` asserts that a role samples its own table and not one it
+was not granted. This is the path that found the `findings()` and `measure()` defects, and reading
+the SQL found neither.
 
 **A rising series, not a single sample.** The escalation test plants two or three samples whose
 `dead_bytes` cross a rung, calls `notify()`, and asserts one notification per rung, then the silence
@@ -173,7 +190,9 @@ password must not contain the verifier. Assert the stored text, not a boolean th
   `bloat_cause_measure()` keep their shapes.
 - `pgstattuple` stays optional and is never invoked by the view, the sampler, or any function that
   does not exist solely to measure one named table.
-- `dead_rows_source` stays `'estimated'` on every row the view and the sampler report.
+- `dead_rows_source` stays `'estimated'` on every row the view and the sampler report that has
+  figures; the only other value the sampler writes is `'unknown'`, with null figures, for a sample
+  taken across a statistics reset.
 - Version: this is `0.4.0`, a new release script and a new update path, not an edit to `0.3.1`.
 
 ## The decisions, now settled
@@ -184,10 +203,13 @@ password must not contain the verifier. Assert the stored text, not a boolean th
 - The first draft's other two open decisions, the metric and the holder, were settled earlier and are
   marked **[review]** in the text.
 
-## The next concrete step
+## What shipped
 
-Write the red tests against the contract: the sampler writes one row per table above the floors and
-none for a table below them that is not already in the series; a sample across a statistics reset is
-unknown, not a clear; `notify()` fires once per rung and is silent at the same rung; a table dropping
-below the floor stops being watched without a clear. Then add the function to make them pass, after
-the `pgstattuple`-free matrix leg exists.
+All six items of the order of work above are done, and the tests the Verification section calls for
+are in `test/02_history.sql` and `test/03_detect.sql`: the sampler writes one row per table above the
+floors and none for a table below them that is not already in the series; a sample across a
+statistics reset is recorded as unknown, not a clear; `notify()` fires once per rung and is silent at
+the same rung; a table dropping out of the findings stops being watched without a clear; `cleared`
+carries the last level with `previous_level` absent. The redaction case is deliberately not built:
+`holder_query` is always NULL in 0.4.0, because storing query text needs an explicit opt-in and this
+release ships none (these extensions have no configuration of their own, and no GUC was invented).

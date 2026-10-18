@@ -4,7 +4,8 @@
 
 | Version | Supported | Why |
 |---|---|---|
-| 0.1 | **yes** | the current release, tagged `v0.1.0` |
+| 0.4 | **yes** | the current release, tagged `v0.4.0` |
+| 0.3.1 and older | no | superseded; update to 0.4 |
 
 Fixes are made on `main` and released as a new version. Released tags are not edited.
 
@@ -30,9 +31,13 @@ unless you ask not to be.
 
 ## What counts
 
-pg_bloat_cause is pure SQL, reads only, and every function and the view run with the **caller's**
-rights (`SECURITY INVOKER`; none is `SECURITY DEFINER`), as INSTALL.md explains. So the issues that
-matter most are about privilege and about writing:
+The readers (`bloat_cause`, `bloat_cause_findings()`, `bloat_cause_text()`,
+`bloat_cause_holder()`, `bloat_cause_command()` and `bloat_cause_measure()`) read only and run with
+the **caller's** rights (`SECURITY INVOKER`; none is `SECURITY DEFINER`), as INSTALL.md explains.
+The four writers added in 0.4.0 (`bloat_cause_sample()`, `bloat_cause_prune()`,
+`bloat_cause_notify()` and `bloat_cause_notify_resolved()`) also run with the caller's rights and
+write only to this extension's own two tables, `bloat_cause_history` and `bloat_cause_alert`; none
+of them touches a user table. So the issues that matter most are about privilege and about writing:
 
 - a role reading something its grants should hide, for example another user's session details
   without `pg_read_all_stats`;

@@ -3,6 +3,46 @@
 Versions are listed newest first. Released tags are never edited: a change that needs
 a new entry gets a new version.
 
+## 0.4.0 (2026-10-18)
+
+Step 6: the sampler, the history, the pruner and the two senders of the shared `pg_incident_watch`
+alert contract, settled in [docs/detect.md](docs/detect.md) before the SQL.
+
+- `bloat_cause_history` is the sampled series: one row per table per sample with the estimated dead
+  figures, the source label, and the horizon holder's context. It is registered with
+  `pg_extension_config_dump`, because the series is the user's data and is what makes a trend
+  readable after the fact.
+- `bloat_cause_sample(pct, bytes, at)` appends one sample of every table worth a row: at or above
+  both floors, or already in the series so a series that starts does not silently stop. It reads
+  `bloat_cause_findings()` and never measures, so `pgstattuple` stays optional and is never touched.
+  Every figure it records is `dead_rows_source = 'estimated'`; a sample taken across a
+  `pg_stat_reset()` or crash recovery is recorded as `'unknown'` with null figures, so a reset cannot
+  read as a table that cleared. A role granted the sampler samples only the tables it can read,
+  because PostgreSQL's statistics views are not filtered by privilege the way `pg_stat_activity` is.
+- `bloat_cause_prune(older_than)` drops samples older than an age, default 35 days.
+- `bloat_cause_notify(channel, pct, bytes, age)` raises one `NOTIFY` per onset and per escalation on
+  the `bloat_cause` channel. A table is notable when it is BOTH at least `min_dead_pct` dead AND at
+  least `min_dead_bytes` of dead space; the first rung IS `min_dead_bytes` (100 MB by default) and
+  each rung above is ten times the one below with **no fixed top**. The rung is compared against the
+  highest already notified, never against the previous sample, so a table that sits still notifies
+  once. `bloat_cause_alert` is that high-water state, one row per subject per channel.
+- `bloat_cause_notify_resolved(...)` raises one `cleared` `NOTIFY` when a watched table is below the
+  alert threshold and clears its state. A table that has left `bloat_cause_findings()` is not
+  watched and is not cleared, and a subject whose most recent sample is `unknown`, taken across a
+  reset, is not cleared either.
+- The payloads carry the five required keys of the shared contract (`tool`, `subject`, `sampled_at`,
+  `event`, `channel`) plus `level` and `previous_level`, with the same shape `pg_lock_tree` 1.2.0
+  ships. `subject` is the schema-qualified relation name, `format('%I.%I', schemaname, relname)`.
+  `level` is the notification count read after the increment (1 at onset, the prior count plus one at
+  each escalation); `previous_level` is that minus one, null at onset; `cleared` carries the last
+  level with `previous_level` absent.
+- `holder_query` is always NULL in 0.4.0. Storing query text needs an explicit opt-in, this release
+  ships none, and these extensions have no configuration of their own, so no GUC was invented.
+- Nothing existing changes: `bloat_cause_findings()`, `bloat_cause_text()`, `bloat_cause_holder()`,
+  `bloat_cause_command()` and `bloat_cause_measure()` keep their shapes and their output.
+- New tests: `test/02_history.sql` for the sampler, the history and the pruner; `test/03_detect.sql`
+  for the ladder, the payload shape and the cleared payload.
+
 ## 0.3.1 (2026-10-15)
 
 **0.3.0's `bloat_cause_measure()` never worked.** It built the heap read with `format('%L', oid)`,
