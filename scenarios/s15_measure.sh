@@ -26,6 +26,11 @@ has_extension || exit 0
 make_table s15_orders 20000 "WITH (autovacuum_enabled = false, fillfactor = 50)"
 psql_q -c "UPDATE $SCHEMA.s15_orders SET status = 'paid' WHERE id % 2 = 0"
 psql_q -c "ANALYZE $SCHEMA.s15_orders"
+# n_dead_tup is written asynchronously: by the stats collector on 14, by each backend at transaction
+# end on 15 and later. Reading the estimate right after the UPDATE caught it at zero on 14 in CI and
+# the findings row was absent, so the comparison against the estimate failed. settle_stats is what
+# every other scenario that reads a cumulative counter uses.
+settle_stats
 
 say "the measurement, both modes"
 psql -X -P pager=off -c "
