@@ -20,6 +20,9 @@ naptime=$(val "SELECT setting::int FROM pg_settings WHERE name = 'autovacuum_nap
 note "waiting $((naptime * 4)) s, four autovacuum naptimes"
 sleep $((naptime * 4))
 
+# The read below is of a cumulative statistic: settle it rather than assume the long sleep covered
+# the stats collector's own cadence.
+settle_stats
 usual_query s6_orders
 measured s6_orders
 say "evidence: the table's threshold against its dead rows"
