@@ -33,6 +33,9 @@ naptime=$(val "SELECT setting::int FROM pg_settings WHERE name = 'autovacuum_nap
 note "part 1: waiting $((naptime * 4)) s for an ordinary autovacuum to try the table"
 sleep $((naptime * 4))
 
+# The read below is of a cumulative statistic (usual_query reads pg_stat_user_tables): settle it
+# rather than assume the long sleep covered the stats collector's own cadence.
+settle_stats
 usual_query s7_orders
 say "evidence, part 1: autovacuum workers on this table right now (expected: none)"
 psql -X -P pager=off -c "

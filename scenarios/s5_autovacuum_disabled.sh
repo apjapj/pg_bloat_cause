@@ -12,6 +12,9 @@ naptime=$(val "SELECT setting::int FROM pg_settings WHERE name = 'autovacuum_nap
 note "waiting $((naptime * 4)) s, four autovacuum naptimes, for the control table to be vacuumed"
 sleep $((naptime * 4))
 
+# The read below is of a cumulative statistic: settle it rather than assume the long sleep covered
+# the stats collector's own cadence.
+settle_stats
 usual_query s5_orders,s5_control
 measured s5_orders,s5_control
 say "evidence: the reloption and the trigger threshold"

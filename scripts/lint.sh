@@ -46,3 +46,7 @@ bash ./scripts/check-ci-parity.sh
 # so this is the in-repo half of the sync. Vendored from pg-dev-infra; run with bash.
 step "the vendored harness matches its headers"
 bash ./scripts/check-vendored-hashes.sh
+# A scenario that reads a cumulative statistic must settle the statistics first, or the read races the
+# collector. s15_measure reached CI that way, as a flake that a text check would have caught.
+step "scenarios settle the statistics they read"
+./scripts/check-scenario-stats.sh
