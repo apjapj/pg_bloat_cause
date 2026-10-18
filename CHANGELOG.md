@@ -16,9 +16,10 @@ alert contract, settled in [docs/detect.md](docs/detect.md) before the SQL.
   both floors, or already in the series so a series that starts does not silently stop. It reads
   `bloat_cause_findings()` and never measures, so `pgstattuple` stays optional and is never touched.
   Every figure it records is `dead_rows_source = 'estimated'`; a sample taken across a
-  `pg_stat_reset()` or crash recovery is recorded as `'unknown'` with null figures, so a reset cannot
-  read as a table that cleared. A role granted the sampler samples only the tables it can read,
-  because PostgreSQL's statistics views are not filtered by privilege the way `pg_stat_activity` is.
+  `pg_stat_reset()` or crash recovery writes no row and is counted in `not_established`, so a reset
+  cannot read as a table that cleared and `'unknown'` is not a value the column takes. A role granted
+  the sampler samples only the tables it can read, because PostgreSQL's statistics views are not
+  filtered by privilege the way `pg_stat_activity` is.
 - `bloat_cause_prune(older_than)` drops samples older than an age, default 35 days.
 - `bloat_cause_notify(channel, pct, bytes, age)` raises one `NOTIFY` per onset and per escalation on
   the `bloat_cause` channel. A table is notable when it is BOTH at least `min_dead_pct` dead AND at
@@ -28,8 +29,8 @@ alert contract, settled in [docs/detect.md](docs/detect.md) before the SQL.
   once. `bloat_cause_alert` is that high-water state, one row per subject per channel.
 - `bloat_cause_notify_resolved(...)` raises one `cleared` `NOTIFY` when a watched table is below the
   alert threshold and clears its state. A table that has left `bloat_cause_findings()` is not
-  watched and is not cleared, and a subject whose most recent sample is `unknown`, taken across a
-  reset, is not cleared either.
+  watched and is not cleared, and a subject whose most recent sample is older than the current
+  statistics reset time is unknown and is not cleared either.
 - The payloads carry the five required keys of the shared contract (`tool`, `subject`, `sampled_at`,
   `event`, `channel`) plus `level` and `previous_level`, with the same shape `pg_lock_tree` 1.2.0
   ships. `subject` is the schema-qualified relation name, `format('%I.%I', schemaname, relname)`.

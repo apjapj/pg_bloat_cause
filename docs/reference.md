@@ -143,10 +143,10 @@ Registered with `pg_extension_config_dump`, so `pg_dump` carries it.
 | `sampled_at` | `timestamptz` | The instant the sample is about. |
 | `schemaname` | `name` | Schema of the table. |
 | `relname` | `name` | Table name. |
-| `dead_rows` | `bigint` | Estimated dead rows, or NULL for an unknown sample. |
-| `dead_pct` | `numeric` | Estimated dead share, or NULL for an unknown sample. |
-| `dead_bytes` | `bigint` | Estimated reclaimable bytes, or NULL for an unknown sample. |
-| `dead_rows_source` | `text` | `estimated`, or `unknown` for a sample taken across a statistics reset. |
+| `dead_rows` | `bigint` | Estimated dead rows. |
+| `dead_pct` | `numeric` | Estimated dead share. |
+| `dead_bytes` | `bigint` | Estimated reclaimable bytes. |
+| `dead_rows_source` | `text` | Always `estimated` in 0.4.0: the view and the sampler report estimates. A sample taken across a statistics reset writes no row, so `unknown` is not a value it takes. |
 | `holder_pid` | `int` | The horizon holder's pid when the cause was `horizon holder`, else NULL. |
 | `holder_xid_age` | `interval` | How long that holder had run, else NULL. |
 | `holder_slot` | `text` | The replication slot when a slot was the holder, else NULL. |
@@ -157,9 +157,10 @@ Registered with `pg_extension_config_dump`, so `pg_dump` carries it.
 Appends one sample of every table worth a row: at or above both floors, or already in the history,
 so a series that starts does not silently stop. Returns one row per cause with `sampled`,
 `below_floor` and `not_established` counts. It reads `bloat_cause_findings()` and never measures, so
-it needs no `pgstattuple`. A sample taken across a `pg_stat_reset()` is recorded as `unknown` with
-null figures. A role granted the sampler samples only the tables it can read. Schedule it; the
-`sampled_at` argument is for fixtures.
+it needs no `pgstattuple`. A sample taken across a `pg_stat_reset()` writes no row and is counted in
+`not_established`: the gap in the series is the record, and `dead_rows_source` stays `estimated`. A
+role granted the sampler samples only the tables it can read. Schedule it; the `sampled_at` argument
+is for fixtures.
 
 ## `bloat_cause_prune(older_than interval DEFAULT '35 days')`
 
@@ -181,8 +182,8 @@ contract: `tool`, `subject` (the schema-qualified relation name), `sampled_at`, 
 Raises one `cleared` `NOTIFY` per subject that had alerted and is still watched (present in
 `bloat_cause_findings()`) but is now below the alert threshold, then forgets its state. A table that
 has left the findings is not watched and is not cleared, and a subject whose most recent sample is
-`unknown`, taken across a reset, is not cleared either. The `cleared` payload carries `level` (the
-last level reached) with `previous_level` absent.
+older than the current statistics reset time is unknown and is not cleared either. The `cleared`
+payload carries `level` (the last level reached) with `previous_level` absent.
 
 ## `bloat_cause_alert` (table)
 

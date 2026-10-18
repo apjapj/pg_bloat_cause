@@ -2,8 +2,9 @@
 --
 -- The behaviours that matter here are the ones a single sample cannot show: that a table below the
 -- floors is not recorded unless it is already in the series, that a sample taken across a
--- pg_stat_reset() is recorded as unknown rather than as a table that cleared, that the pruner drops
--- only what is old, and that a role granted the sampler sees only the tables it can read.
+-- pg_stat_reset() writes no row and is reported in not_established rather than read as a table that
+-- cleared, that the pruner drops only what is old, and that a role granted the sampler sees only the
+-- tables it can read.
 --
 -- Written red-first where practical: it asserts the contract docs/detect.md settled before the SQL
 -- existed. It calls every function 0.4.0 adds, because a function nothing calls is a function nobody
@@ -179,9 +180,10 @@ SELECT is((SELECT count(*)::int FROM bloat_cause_history
 -- ---------------------------------------------------------------- a statistics reset is unknown
 
 -- pg_stat_reset() zeroes n_dead_tup and moves the database statistics reset time. The next sample
--- of a table whose last sample predates the reset is recorded as unknown, with null figures, so the
--- drop to zero cannot read as a table that cleared. A caller passing sampled_at lays a fixture, so
--- the first sample here is backdated before the reset.
+-- of a table whose last sample predates the reset writes NO row: the drop to zero cannot read as a
+-- table that cleared, and dead_rows_source keeps its meaning ('unknown' is not a value it takes).
+-- The gap is the record, and the sample reports it in not_established. A caller passing sampled_at
+-- lays a fixture, so the first sample here is backdated before the reset.
 \o /dev/null
 DROP TABLE IF EXISTS bc_h_reset;
 CREATE TABLE bc_h_reset (id int PRIMARY KEY, v text) WITH (autovacuum_enabled = false);
@@ -206,14 +208,15 @@ SELECT sum(sampled)::int AS sampled, sum(below_floor)::int AS below_floor,
                           sampled_at => current_setting('bc_h.t0')::timestamptz + interval '50 seconds')
 \gset
 \o
-SELECT is((SELECT dead_rows_source FROM bloat_cause_history
-            WHERE relname = 'bc_h_reset' ORDER BY sampled_at DESC LIMIT 1),
-          'unknown', 'a sample taken across a pg_stat_reset() is recorded as unknown');
-SELECT is((SELECT dead_rows IS NULL AND dead_bytes IS NULL FROM bloat_cause_history
-            WHERE relname = 'bc_h_reset' ORDER BY sampled_at DESC LIMIT 1),
-          true, 'with null figures, so the reset cannot read as a drop to zero');
+SELECT is((SELECT count(*)::int FROM bloat_cause_history
+            WHERE relname = 'bc_h_reset'
+              AND sampled_at = current_setting('bc_h.t0')::timestamptz + interval '50 seconds'), 0,
+          'a sample taken across a pg_stat_reset() writes no row');
 SELECT ok(:not_established::int >= 1,
           'and the return value counts it as not established rather than as sampled');
+SELECT is((SELECT count(*)::int FROM bloat_cause_history
+            WHERE dead_rows_source IS DISTINCT FROM 'estimated'), 0,
+          'every row the sampler writes is estimated: unknown is not a value dead_rows_source takes');
 
 -- ---------------------------------------------------------------- pruning
 

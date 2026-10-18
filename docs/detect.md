@@ -6,21 +6,26 @@
 the plan for step 6 of `README.md`, written before the SQL so the next session started from decisions
 rather than questions, the way `docs/measure.md` was written for `bloat_cause_measure()`. The shared
 contract in `pg_incident_watch` is the authority for the payload; this document is the authority for
-what bloat_cause samples and when it notifies.
+what bloat_cause samples and when it notifies. The statistics-reset design was reworked in review: a
+sample taken across a reset writes no row and is reported in `not_established`, and the sender
+compares the subject's latest sample against the reset time rather than keying on a marker row.
 
 The three decisions this document first left open have since been settled in review; they are marked
 **[review]** below. The last one, the escalation's size rungs, is settled too, marked **[settled]**.
 
-Two points are worth recording as built rather than as planned. The stats-reset guard compares
-`pg_stat_get_db_stat_reset_time()` against the subject's previous sample, so a sample taken across a
-reset is written with `dead_rows_source = 'unknown'` and null figures; a sample with figures is
-`'estimated'` as everywhere else, which is the one reading of "still estimated" that lets a reset be
-distinguishable. And the sampler filters to tables the calling role can read, because PostgreSQL's
-statistics views are not filtered by privilege the way `pg_stat_activity` is: without that filter a
-role granted only the sampler would read another role's tables into the shared history, which the
-Verification section below requires it not to. `holder_query` is always NULL in 0.4.0: storing query
-text needs an explicit opt-in and this release ships none, so the column exists and stays empty
-rather than holding text that would have to be redacted on every sample.
+Three points are worth recording as built, including one correction to this plan. The stats-reset
+guard compares `pg_stat_get_db_stat_reset_time()` against the subject's previous sample, and a sample
+taken across a reset writes **no row**: it is counted in `not_established`, and the gap in the series
+is the record. `dead_rows_source` therefore keeps its meaning and is `'estimated'` on every row the
+view and the sampler write; `'unknown'` is not a value it takes. The sender decides unknown for
+itself, by comparing the subject's latest sample against the reset time. The plan's privilege premise
+was also **corrected**: it assumed `pg_stat_user_tables` was filtered by privilege the way
+`pg_stat_activity` is, which PostgreSQL does not do. The sampler filters to tables the calling role
+can read with `has_table_privilege(c.oid, 'SELECT')`, so a role granted only the sampler does not read
+another role's tables into the shared history, which the Verification section below requires. The
+filter stays. `holder_query` is always NULL in 0.4.0: storing query text needs an explicit opt-in and
+this release ships none, so the column exists and stays empty rather than holding text that would
+have to be redacted on every sample.
 
 ## What it will be
 
@@ -53,7 +58,7 @@ bloat_cause_history (
   dead_rows      bigint,
   dead_pct       numeric,
   dead_bytes     bigint,
-  dead_rows_source text,        -- 'estimated' normally; 'unknown' across a statistics reset
+  dead_rows_source text,        -- always 'estimated': the sample never measures, and a reset writes no row
   holder_pid     int,           -- the horizon holder, or NULL
   holder_xid_age interval,      -- how long that transaction has run, or NULL
   holder_slot    text,          -- the replication slot, when a slot is the holder, or NULL
@@ -116,9 +121,16 @@ must work on every sample is weaker than not storing the text at all.
 
 **A statistics reset is unknown, not resolved.** **[review]** `n_dead_tup` is reset by a crash or by
 `pg_stat_reset()`. Without a guard the next sample reads as a drop to zero and would be reported as
-"cleared" when it is really "unknown". The sample compares the statistics reset time, and a sample
-taken across a reset is recorded with `dead_rows_source` and treated as unknown by the sender rather
-than as a cleared table.
+"cleared" when it is really "unknown". A sample taken across a reset writes **no row**: the gap in the
+series is the record, and the call reports it in `not_established` rather than hiding it in a row.
+`dead_rows_source` is not overloaded for this; it stays `'estimated'` on every row the sampler writes.
+The sender decides unknown for itself, by comparing the subject's latest
+`bloat_cause_history.sampled_at` against `pg_stat_get_db_stat_reset_time()`: when the latest sample is
+older than the reset time, the state is unknown, and `bloat_cause_notify_resolved()` must not send
+`cleared`. That is the rule that matters most. `bloat_cause_notify()` walks the current findings, so a
+reset that zeroes the counters simply removes the table from consideration: it raises nothing from a
+table that is no longer notable and never clears state. A table that comes back after the reset is a
+real current reading, and its state is still there because no clear was sent.
 
 **A table leaving the sampled set is no longer watched, not cleared.** **[review]** A table that
 drops below the floor stops being sampled; that must not send a "resolved". `bloat_cause_notify_resolved()`
@@ -165,19 +177,21 @@ Building the harness before the thing it tests is what this repository learned t
 **With `pgstattuple` and without it.** The without case is the new matrix leg, meaningful precisely
 because the sampler must not depend on it.
 
-**An unprivileged role.** The sampler reads `pg_stat_user_tables`, which PostgreSQL does **not**
-filter by privilege the way it filters `pg_stat_activity`, so a role granted only the sampler would
-otherwise read another role's tables into the shared history. The sampler filters to the tables the
-caller can read, and `test/02_history.sql` asserts that a role samples its own table and not one it
-was not granted. This is the path that found the `findings()` and `measure()` defects, and reading
-the SQL found neither.
+**An unprivileged role.** This section first assumed, wrongly, that `pg_stat_user_tables` was
+filtered by privilege the way `pg_stat_activity` is. That premise was **corrected**: PostgreSQL's
+statistics views are not filtered, so a role granted only the sampler would otherwise read another
+role's tables into the shared history. The sampler therefore filters to the tables the caller can
+read, and `test/02_history.sql` asserts that a role samples its own table and not one it was not
+granted. This is the path that found the `findings()` and `measure()` defects, and reading the SQL
+found neither.
 
 **A rising series, not a single sample.** The escalation test plants two or three samples whose
 `dead_bytes` cross a rung, calls `notify()`, and asserts one notification per rung, then the silence
 at the same rung. The silence half is the one a notify-on-every-sample function fails.
 
-**A statistics reset.** `pg_stat_reset()`, then a sample, must be recorded as unknown and must not
-clear a standing alert.
+**A statistics reset.** `pg_stat_reset()`, then a sample, must write no row and must report
+`not_established`, and the reset must never clear a standing alert. The sender compares the subject's
+latest sample against the reset time, so no marker row is needed.
 
 **A table falling below the floor.** It must stop being sampled and must not send a "resolved".
 
@@ -190,9 +204,8 @@ password must not contain the verifier. Assert the stored text, not a boolean th
   `bloat_cause_measure()` keep their shapes.
 - `pgstattuple` stays optional and is never invoked by the view, the sampler, or any function that
   does not exist solely to measure one named table.
-- `dead_rows_source` stays `'estimated'` on every row the view and the sampler report that has
-  figures; the only other value the sampler writes is `'unknown'`, with null figures, for a sample
-  taken across a statistics reset.
+- `dead_rows_source` stays `'estimated'` on every row the view and the sampler report. A sample
+  taken across a statistics reset writes no row, so `'unknown'` is never a value it takes.
 - Version: this is `0.4.0`, a new release script and a new update path, not an edit to `0.3.1`.
 
 ## The decisions, now settled
@@ -208,8 +221,10 @@ password must not contain the verifier. Assert the stored text, not a boolean th
 All six items of the order of work above are done, and the tests the Verification section calls for
 are in `test/02_history.sql` and `test/03_detect.sql`: the sampler writes one row per table above the
 floors and none for a table below them that is not already in the series; a sample across a
-statistics reset is recorded as unknown, not a clear; `notify()` fires once per rung and is silent at
-the same rung; a table dropping out of the findings stops being watched without a clear; `cleared`
-carries the last level with `previous_level` absent. The redaction case is deliberately not built:
+statistics reset writes no row, increments `not_established`, and leaves every
+`dead_rows_source` at `'estimated'`; `notify()` fires once per rung and is silent at the same rung; a
+reset never produces a `cleared`, and a table that dropped out of the findings is not cleared either;
+`cleared` carries the last level with `previous_level` absent. The redaction case is deliberately not
+built:
 `holder_query` is always NULL in 0.4.0, because storing query text needs an explicit opt-in and this
 release ships none (these extensions have no configuration of their own, and no GUC was invented).

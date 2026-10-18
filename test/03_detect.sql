@@ -60,7 +60,7 @@ SELECT dead_bytes AS b, dead_bytes / 10 AS b10, dead_bytes / 100 AS b100,
        dead_bytes * 10 AS b10up
   FROM bloat_cause_findings() WHERE relname = 'bc_det' \gset
 \o
-SELECT plan(35);
+SELECT plan(36);
 
 SELECT ok(:b::bigint > 0, 'the fixture has estimated dead bytes to climb the ladder with');
 
@@ -200,10 +200,13 @@ SELECT is(:res_gone::int, 0,
 SELECT is((SELECT count(*)::int FROM bloat_cause_alert WHERE subject = 'public.bc_det_gone'), 1,
           'and its alert state is kept, so it is not silently forgotten either');
 
--- ---------------------------------------------------------------- a reset sample is unknown, not resolved
+-- ---------------------------------------------------------------- a reset is unknown, not resolved
 
--- The same shape as the reset case in test/02: the most recent sample for the subject is 'unknown',
--- taken across a statistics reset. bloat_cause_notify_resolved() must not read that as a clear.
+-- The same shape as the reset case in test/02, but through the sender. A sample taken before
+-- pg_stat_reset() is the subject's latest sample; the reset then zeroes the counters and no row is
+-- written across it. The table accumulates a few new dead rows, so it is still in the findings and
+-- the clear path is reached. The sender must see that the latest sample predates the reset, call the
+-- state unknown, and NOT send cleared. It decides this from the reset time, not from a marker row.
 \o /dev/null
 DROP TABLE IF EXISTS bc_det_unk;
 CREATE TABLE bc_det_unk (id int PRIMARY KEY, v text) WITH (autovacuum_enabled = false);
@@ -219,14 +222,23 @@ SELECT dead_bytes AS u FROM bloat_cause_findings() WHERE relname = 'bc_det_unk' 
 SET search_path = bc_det_shadow, public, pg_catalog;
 SELECT bloat_cause_notify(min_dead_bytes => :u) AS unk_onset \gset
 RESET search_path;
--- The unknown sample the sampler would have written across a reset, inserted here directly so the
--- guard is tested without disturbing the cluster's reset time.
-INSERT INTO bloat_cause_history (sampled_at, schemaname, relname, dead_rows_source)
-VALUES (statement_timestamp(), 'public', 'bc_det_unk', 'unknown');
+-- The last sample before the reset, recorded as the sampler would record it: 'estimated'.
+INSERT INTO bloat_cause_history
+       (sampled_at, schemaname, relname, dead_rows, dead_pct, dead_bytes, dead_rows_source)
+SELECT statement_timestamp(), 'public', 'bc_det_unk', dead_rows, dead_pct, dead_bytes, 'estimated'
+  FROM bloat_cause_findings() WHERE relname = 'bc_det_unk';
+-- The reset moves the database statistics reset time past that sample. A few new dead rows then put
+-- the table back in the findings, below the alert threshold, which is the state that would clear if
+-- the reset were mistaken for recovery.
+SELECT pg_stat_reset();
+UPDATE bc_det_unk SET v = 'refund' WHERE id <= 10;
 \o
+SELECT pg_sleep(1.5);
+SELECT pg_stat_clear_snapshot();
+
 \o /dev/null
 SET search_path = bc_det_shadow, public, pg_catalog;
-SELECT bloat_cause_notify_resolved(min_dead_bytes => 1) AS res_unk \gset
+SELECT bloat_cause_notify_resolved(min_dead_bytes => :u * 10) AS res_unk \gset
 RESET search_path;
 \o
 SELECT is(:unk_onset::int, 1, 'the third fixture is an onset too');
@@ -234,8 +246,10 @@ SELECT ok((SELECT (payload::jsonb ->> 'level')::int = 1 FROM bc_det_shadow.notif
             WHERE payload::jsonb ->> 'subject' = 'public.bc_det_unk'
               AND payload::jsonb ->> 'event' = 'alerting'),
           'and carries level 1 at onset');
+SELECT is((SELECT count(*)::int FROM bloat_cause_findings() WHERE relname = 'bc_det_unk'), 1,
+          'after the reset it is back in the findings, so the guard is what is tested, not absence');
 SELECT is(:res_unk::int, 0,
-          'a subject whose latest sample is unknown, taken across a reset, is not cleared');
+          'a subject whose latest sample is older than the reset time is unknown, not cleared');
 SELECT is((SELECT count(*)::int FROM bloat_cause_alert WHERE subject = 'public.bc_det_unk'), 1,
           'and its state is kept');
 

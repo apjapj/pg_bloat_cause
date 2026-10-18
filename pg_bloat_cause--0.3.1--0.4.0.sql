@@ -15,9 +15,9 @@
 -- rewrites nothing, so no CREATE OR REPLACE is needed and no grant is restated.
 --
 -- The sampler reads bloat_cause_findings() and never measures. It writes dead_rows_source =
--- 'estimated' on every row it records, except a sample taken across a pg_stat_reset() or crash
--- recovery, which is recorded as 'unknown' with null figures so a reset cannot read as a table that
--- cleared. See docs/detect.md for the whole reasoning.
+-- 'estimated' on every row it records. A sample taken across a pg_stat_reset() or crash recovery
+-- writes no row at all and is reported in not_established instead, so a reset cannot read as a table
+-- that cleared. See docs/detect.md for the whole reasoning.
 
 \echo Use "ALTER EXTENSION pg_bloat_cause UPDATE TO '0.4.0'" to load this file. \quit
 
@@ -50,9 +50,10 @@ CREATE INDEX bloat_cause_history_sampled_at_idx
 
 COMMENT ON TABLE @extschema@.bloat_cause_history IS
   'Samples written by bloat_cause_sample(), one row per table per sample. dead_rows, dead_pct and '
-  'dead_bytes are estimates from pg_stat_user_tables, and dead_rows_source says so. A sample taken '
-  'across a pg_stat_reset() or crash recovery is recorded with dead_rows_source = ''unknown'' and '
-  'null figures, so a reset cannot be read as a table that cleared. holder_pid, holder_xid_age and '
+  'dead_bytes are estimates from pg_stat_user_tables, and dead_rows_source says so: it is '
+  '''estimated'' on every row this table holds. A sample taken across a pg_stat_reset() or crash '
+  'recovery writes NO row at all, so a reset cannot be read as a table that cleared; the gap in the '
+  'series is the record and the sampler reports it in not_established. holder_pid, holder_xid_age and '
   'holder_slot are the horizon holder that was pinning the table when its cause was ''horizon '
   'holder'', NULL otherwise. holder_query is always NULL in 0.4.0: storing query text needs an '
   'explicit opt-in and this release ships none. Prune with bloat_cause_prune().';
@@ -75,6 +76,11 @@ SELECT pg_catalog.pg_extension_config_dump('@extschema@.bloat_cause_history', ''
 --
 -- One INSERT for the whole sample rather than one per table, so the row count is bounded by the
 -- number of tables and the write is a single statement.
+--
+-- A sample taken across a statistics reset writes NO row and is counted in not_established. The gap in
+-- the series is the record; writing a row would either record a false drop to zero or put a
+-- dead_rows_source value the view never reports into the shared history, and 'unknown' is not a value
+-- that column takes. The sender decides "unknown" for itself, from the reset time.
 CREATE FUNCTION @extschema@.bloat_cause_sample(min_dead_pct numeric DEFAULT 0.1,
                                                min_dead_bytes bigint DEFAULT 0,
                                                sampled_at timestamptz DEFAULT NULL)
@@ -119,7 +125,7 @@ BEGIN
   END IF;
 
   -- The database statistics reset time. A sample taken after a reset for a table whose last sample
-  -- predates it is recorded as unknown, never as a drop to zero.
+  -- predates it writes no row: the drop to zero is never recorded, and the gap is reported instead.
   SELECT pg_stat_get_db_stat_reset_time(d.oid) INTO reset_at
     FROM pg_database d WHERE d.datname = current_database();
 
@@ -143,8 +149,7 @@ BEGIN
     SELECT h.schemaname, h.relname,
            f.dead_rows, f.dead_pct, f.dead_bytes, f.cause,
            (f.relname IS NOT NULL) AS in_findings,
-           prev.sampled_at AS prev_at,
-           c.oid IS NOT NULL AS table_exists
+           prev.sampled_at AS prev_at
       FROM hist h
       LEFT JOIN f ON f.schemaname = h.schemaname AND f.relname = h.relname
       LEFT JOIN LATERAL (
@@ -161,17 +166,16 @@ BEGIN
      -- another role's tables into the shared history. The filter is the guarantee detect.md states.
      WHERE c.oid IS NOT NULL AND has_table_privilege(c.oid, 'SELECT')
   LOOP
-    -- A sample across a statistics reset is unknown, not a clear. Only a table that still exists gets
-    -- the unknown row; a dropped table is simply gone and its series stops.
+    -- A sample taken across a statistics reset is unknown, not a clear, and it writes NO row. The gap
+    -- in the series is the record, and it is visible in the not_established count below rather than
+    -- hidden in a row: dead_rows_source keeps its meaning, 'estimated' on every row the view and the
+    -- sampler write, and 'unknown' is not a value it takes. The table is grouped under its cause kind,
+    -- so the per-kind totals stay honest. Because no row is written, the sender cannot look for a
+    -- marker: bloat_cause_notify_resolved() decides unknown from the reset time itself.
     IF r.prev_at IS NOT NULL AND reset_at IS NOT NULL AND reset_at > r.prev_at THEN
-      CONTINUE WHEN NOT r.table_exists;
-      k := 'unknown';
+      k := coalesce(r.cause, 'no cause');
       ks := ks || k; c_s := c_s || 0; c_b := c_b || 0; c_x := c_x || 1;
       unknown_n := unknown_n + 1;
-      ins_schema := ins_schema || r.schemaname; ins_rel := ins_rel || r.relname;
-      ins_dr := ins_dr || NULL::bigint; ins_dp := ins_dp || NULL::numeric; ins_db := ins_db || NULL::bigint;
-      ins_src := ins_src || 'unknown'::text;
-      ins_hpid := ins_hpid || NULL::int; ins_hage := ins_hage || NULL::interval; ins_hslot := ins_hslot || NULL::text;
       CONTINUE;
     END IF;
 
@@ -225,9 +229,9 @@ COMMENT ON FUNCTION @extschema@.bloat_cause_sample(numeric, bigint, timestamptz)
   'Append one sample of every table worth a row to bloat_cause_history: at or above both floors, or '
   'already in the series. Reads bloat_cause_findings() and never measures, so pgstattuple is never '
   'needed. Every figure it records is dead_rows_source = ''estimated''; a sample taken across a '
-  'pg_stat_reset() or crash recovery is recorded as ''unknown'' with null figures. Runs with the '
+  'pg_stat_reset() or crash recovery writes no row and is reported in not_established. Runs with the '
   'caller''s rights and returns, per cause, how many it sampled, how many were below the floor, and '
-  'how many were unknown. Schedule it; sampled_at is for fixtures.';
+  'how many were not established. Schedule it; sampled_at is for fixtures.';
 
 -- -------------------------------------------------------------------------------------------------
 -- bloat_cause_prune(): drop samples older than an age.
@@ -288,6 +292,16 @@ COMMENT ON TABLE @extschema@.bloat_cause_alert IS
 -- plus level and previous_level for escalation. subject is the schema-qualified relation name,
 -- format('%I.%I', schemaname, relname), the same identity bloat_cause_findings() prints and the same
 -- one a listener reading a log a week later can resolve without the OID.
+--
+-- A statistics reset is neither an onset nor a resolution here, and no guard is invented for it.
+-- pg_stat_reset() zeroes n_dead_tup, so every affected table leaves bloat_cause_findings() and this
+-- loop, which walks the findings, simply never sees it: nothing is raised from a table that is no
+-- longer notable, and nothing in this function clears state. A table that comes back after a reset is
+-- a current, real reading, so the onset or escalation it raises from that reading is a real change,
+-- not the reset mistaken for one. The one place a reset could be misread, a "cleared" for a table
+-- whose counters were merely reset, is decided in bloat_cause_notify_resolved(), which refuses to
+-- clear a subject whose latest sample predates the reset; because that state is kept, a mere
+-- re-appearance cannot be re-raised as a fresh onset either.
 CREATE FUNCTION @extschema@.bloat_cause_notify(channel text DEFAULT 'bloat_cause',
                                                min_dead_pct numeric DEFAULT 0.1,
                                                min_dead_bytes bigint DEFAULT 104857600,
@@ -403,8 +417,14 @@ COMMENT ON FUNCTION @extschema@.bloat_cause_notify(text, numeric, bigint, interv
 -- A table that is still watched (present in bloat_cause_findings()) and now below the alert threshold
 -- is cleared. A table that has left the findings entirely is not watched, so it is NOT cleared:
 -- absence of data is not recovery, and a table that dropped out of the sampled set must not read as
--- resolved. A table whose most recent sample is 'unknown', taken across a statistics reset, is not
--- cleared either.
+-- resolved.
+--
+-- "Unknown" is decided from the reset time, not from a marker row, because the sampler writes none
+-- across a reset. A subject whose most recent history sample is older than the current statistics
+-- reset time was last seen before the reset, and the drop to zero that followed must not be read as
+-- recovery: it is held back and its state is kept. The rule that matters most is that a clear is
+-- never sent when the state is unknown. A subject with no history at all has nothing older than the
+-- reset and is not held back, which is what lets a fixture that never sampled still be cleared.
 CREATE FUNCTION @extschema@.bloat_cause_notify_resolved(channel text DEFAULT 'bloat_cause',
                                                         min_dead_pct numeric DEFAULT 0.1,
                                                         min_dead_bytes bigint DEFAULT 104857600,
@@ -414,13 +434,20 @@ LANGUAGE plpgsql
 SET lock_timeout = '1s'
 AS $fn$
 DECLARE
-  ch      text    := channel;
-  floor_p numeric := coalesce(min_dead_pct, 0.1);
-  floor_b bigint  := coalesce(min_dead_bytes, 104857600);
-  s       record;
-  f       record;
-  raised  bigint := 0;
+  ch       text    := channel;
+  floor_p  numeric := coalesce(min_dead_pct, 0.1);
+  floor_b  bigint  := coalesce(min_dead_bytes, 104857600);
+  reset_at timestamptz;
+  latest   timestamptz;
+  s        record;
+  f        record;
+  raised   bigint := 0;
 BEGIN
+  -- The database statistics reset time. The sampler writes no row across a reset, so the sender cannot
+  -- look for a marker: it compares the subject's latest sample against the reset time instead.
+  SELECT pg_stat_get_db_stat_reset_time(d.oid) INTO reset_at
+    FROM pg_database d WHERE d.datname = current_database();
+
   FOR s IN SELECT * FROM @extschema@.bloat_cause_alert a WHERE a.channel = ch LOOP
     SELECT * INTO f FROM @extschema@.bloat_cause_findings(min_holder_age) x
      WHERE format('%I.%I', x.schemaname, x.relname) = s.subject;
@@ -428,12 +455,15 @@ BEGIN
     -- Leaving the sampled set is no longer watched, not cleared.
     CONTINUE WHEN NOT FOUND;
 
-    -- A sample taken across a statistics reset is unknown, not resolved.
-    CONTINUE WHEN EXISTS (
-      SELECT 1 FROM @extschema@.bloat_cause_history h
-       WHERE format('%I.%I', h.schemaname, h.relname) = s.subject
-         AND h.sampled_at > s.notified_at
-         AND h.dead_rows_source = 'unknown');
+    -- A subject whose most recent sample is older than the statistics reset time is unknown, not
+    -- resolved: it was last seen before the reset, and the counters read as zero since. There is no
+    -- marker row to key on, so the latest sample is compared against the reset time itself. A subject
+    -- with no history at all (latest is NULL) has nothing that predates the reset and is not held
+    -- back. This is the rule that matters most: NEVER send cleared when the state is unknown.
+    SELECT max(h.sampled_at) INTO latest
+      FROM @extschema@.bloat_cause_history h
+     WHERE format('%I.%I', h.schemaname, h.relname) = s.subject;
+    CONTINUE WHEN latest IS NOT NULL AND reset_at IS NOT NULL AND latest < reset_at;
 
     -- Still at or above both thresholds: still standing, so a resolution now would be noise.
     CONTINUE WHEN f.dead_pct >= floor_p AND f.dead_bytes >= floor_b;
@@ -464,9 +494,10 @@ $fn$;
 COMMENT ON FUNCTION @extschema@.bloat_cause_notify_resolved(text, numeric, bigint, interval) IS
   'Raise one cleared NOTIFY per table that had alerted and is still watched but now below the alert '
   'threshold, then forget its state so the same table bloating again alerts from onset. A table that '
-  'has left bloat_cause_findings() is not watched and is not cleared, and a table whose most recent '
-  'sample is unknown, taken across a statistics reset, is not cleared either. Run it beside '
-  'bloat_cause_notify() with the same thresholds.';
+  'has left bloat_cause_findings() is not watched and is not cleared, and a subject whose most recent '
+  'sample is older than the statistics reset time is unknown and is not cleared either: the sampler '
+  'writes no row across a reset, so the sender compares the latest sample against the reset time. '
+  'Run it beside bloat_cause_notify() with the same thresholds.';
 
 -- The writers are closed like the readers. They write to this extension's own tables and are not
 -- executable by PUBLIC by default; INSTALL.md names the grants a monitoring role needs.
