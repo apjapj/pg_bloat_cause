@@ -146,7 +146,8 @@ Registered with `pg_extension_config_dump`, so `pg_dump` carries it.
 | `dead_rows` | `bigint` | Estimated dead rows. |
 | `dead_pct` | `numeric` | Estimated dead share. |
 | `dead_bytes` | `bigint` | Estimated reclaimable bytes. |
-| `dead_rows_source` | `text` | Always `estimated` in 0.4.0: the view and the sampler report estimates. A sample taken across a statistics reset writes no row, so `unknown` is not a value it takes. |
+| `dead_rows_source` | `text` | Always `estimated` in 0.4.0: the view and the sampler report estimates, the reset marker included. `unknown` is not a value it takes. |
+| `stats_reset` | `boolean` | `true` only on the marker row a sample writes across a `pg_stat_reset()` or crash recovery; `false` on every ordinary row. The marker carries NULL figures and re-baselines the series. |
 | `holder_pid` | `int` | The horizon holder's pid when the cause was `horizon holder`, else NULL. |
 | `holder_xid_age` | `interval` | How long that holder had run, else NULL. |
 | `holder_slot` | `text` | The replication slot when a slot was the holder, else NULL. |
@@ -157,10 +158,11 @@ Registered with `pg_extension_config_dump`, so `pg_dump` carries it.
 Appends one sample of every table worth a row: at or above both floors, or already in the history,
 so a series that starts does not silently stop. Returns one row per cause with `sampled`,
 `below_floor` and `not_established` counts. It reads `bloat_cause_findings()` and never measures, so
-it needs no `pgstattuple`. A sample taken across a `pg_stat_reset()` writes no row and is counted in
-`not_established`: the gap in the series is the record, and `dead_rows_source` stays `estimated`. A
-role granted the sampler samples only the tables it can read. Schedule it; the `sampled_at` argument
-is for fixtures.
+it needs no `pgstattuple`. A sample taken across a `pg_stat_reset()` writes a marker row with
+`stats_reset = true` and NULL figures, and is counted in `not_established`: the marker re-baselines
+the series, so the next sample is ordinary, and `dead_rows_source` stays `estimated`. A role granted
+the sampler samples only the tables it can read. Schedule it; the `sampled_at` argument is for
+fixtures.
 
 ## `bloat_cause_prune(older_than interval DEFAULT '35 days')`
 
@@ -175,15 +177,18 @@ highest already notified, never against the previous sample, so a table that sit
 once. Returns how many notifications it raised. The payload is the shared `pg_incident_watch`
 contract: `tool`, `subject` (the schema-qualified relation name), `sampled_at`, `channel`, `event`,
 `level`, `previous_level`, `dead_rows`, `dead_pct`, `dead_bytes`, `dead_rows_source`, `cause` and
-`cause_detail`.
+`cause_detail`. A statistics reset cannot suppress an alert: this reads the current findings and
+never consults the history or the `stats_reset` marker, so a table over the threshold after a reset
+still alerts and a higher rung after a reset still escalates.
 
 ## `bloat_cause_notify_resolved(channel text DEFAULT 'bloat_cause', min_dead_pct numeric DEFAULT 0.1, min_dead_bytes bigint DEFAULT 104857600, min_holder_age interval DEFAULT '1 minute')`
 
 Raises one `cleared` `NOTIFY` per subject that had alerted and is still watched (present in
 `bloat_cause_findings()`) but is now below the alert threshold, then forgets its state. A table that
-has left the findings is not watched and is not cleared, and a subject whose most recent sample is
-older than the current statistics reset time is unknown and is not cleared either. The `cleared`
-payload carries `level` (the last level reached) with `previous_level` absent.
+has left the findings is not watched and is not cleared, and a subject whose most recent sample is a
+reset marker (`stats_reset = true`) or is older than the current statistics reset time is unknown and
+is not cleared either. The `cleared` payload carries `level` (the last level reached) with
+`previous_level` absent.
 
 ## `bloat_cause_alert` (table)
 

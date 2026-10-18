@@ -2,9 +2,10 @@
 --
 -- The behaviours that matter here are the ones a single sample cannot show: that a table below the
 -- floors is not recorded unless it is already in the series, that a sample taken across a
--- pg_stat_reset() writes no row and is reported in not_established rather than read as a table that
--- cleared, that the pruner drops only what is old, and that a role granted the sampler sees only the
--- tables it can read.
+-- pg_stat_reset() writes a marker row (stats_reset = true, NULL figures) and is reported in
+-- not_established rather than read as a table that cleared, that the series resumes on the next
+-- sample so the table is not lost until the pre-reset row is pruned, that the pruner drops only what
+-- is old, and that a role granted the sampler sees only the tables it can read.
 --
 -- Written red-first where practical: it asserts the contract docs/detect.md settled before the SQL
 -- existed. It calls every function 0.4.0 adds, because a function nothing calls is a function nobody
@@ -27,14 +28,29 @@ CREATE EXTENSION IF NOT EXISTS pg_bloat_cause;
 -- One instant for the whole file, so every sampled_at the test passes is one the assertions can name.
 SELECT set_config('bc_h.t0', statement_timestamp()::text, false);
 \o
-SELECT plan(24);
+SELECT plan(28);
+
+-- Wait for a table to be back in bloat_cause_findings(), clearing the statistics snapshot between
+-- tries. A database-wide pg_stat_reset() zeroes the counters, and on a server with a separate
+-- statistics collector (14 and 15) they are repopulated asynchronously, so a fixed sleep is a race
+-- under load: this is the "statistics reach the view at transaction end" wait test/01 documents,
+-- made bounded rather than fixed.
+CREATE OR REPLACE FUNCTION pg_temp.bc_h_wait(rel text) RETURNS void LANGUAGE plpgsql AS $wait$
+BEGIN
+  FOR i IN 1..40 LOOP
+    PERFORM pg_stat_clear_snapshot();
+    EXIT WHEN EXISTS (SELECT 1 FROM bloat_cause_findings() WHERE relname = rel);
+    PERFORM pg_sleep(0.25);
+  END LOOP;
+END
+$wait$;
 
 -- ---------------------------------------------------------------- the objects
 
 SELECT has_table('bloat_cause_history', 'the history table exists');
 SELECT columns_are('bloat_cause_history',
   ARRAY['sampled_at', 'schemaname', 'relname', 'dead_rows', 'dead_pct', 'dead_bytes',
-        'dead_rows_source', 'holder_pid', 'holder_xid_age', 'holder_slot', 'holder_query'],
+        'dead_rows_source', 'stats_reset', 'holder_pid', 'holder_xid_age', 'holder_slot', 'holder_query'],
   'bloat_cause_history has exactly the columns docs/detect.md settles');
 SELECT col_is_pk('bloat_cause_history', ARRAY['schemaname', 'relname', 'sampled_at'],
                  'one row per table per sample, the primary key detect.md settles');
@@ -180,10 +196,14 @@ SELECT is((SELECT count(*)::int FROM bloat_cause_history
 -- ---------------------------------------------------------------- a statistics reset is unknown
 
 -- pg_stat_reset() zeroes n_dead_tup and moves the database statistics reset time. The next sample
--- of a table whose last sample predates the reset writes NO row: the drop to zero cannot read as a
--- table that cleared, and dead_rows_source keeps its meaning ('unknown' is not a value it takes).
--- The gap is the record, and the sample reports it in not_established. A caller passing sampled_at
--- lays a fixture, so the first sample here is backdated before the reset.
+-- of a table whose last sample predates the reset writes a MARKER row flagged stats_reset = true
+-- with NULL figures: the drop to zero cannot read as a table that cleared, dead_rows_source keeps
+-- its meaning ('unknown' is not a value it takes), and the marker is the first post-reset row so the
+-- next sample is ordinary again. Writing no row at all was the persistence flaw: the pre-reset row
+-- stayed the table's latest sample, so reset_at stayed newer than it on every later sample and the
+-- table was never sampled again until that row was pruned. The sample is reported in
+-- not_established. A caller passing sampled_at lays a fixture, so the first sample here is backdated
+-- before the reset.
 \o /dev/null
 DROP TABLE IF EXISTS bc_h_reset;
 CREATE TABLE bc_h_reset (id int PRIMARY KEY, v text) WITH (autovacuum_enabled = false);
@@ -201,7 +221,15 @@ SELECT sum(sampled)::int AS sampled, sum(below_floor)::int AS below_floor,
   FROM bloat_cause_sample(min_dead_pct => 0.1, min_dead_bytes => 0,
                           sampled_at => current_setting('bc_h.t0')::timestamptz - interval '1 minute')
 \gset
+-- The wait is for the reset time to propagate: on a server with a separate statistics collector (14
+-- and 15) pg_stat_reset() updates pg_stat_get_db_stat_reset_time() asynchronously, and a sample taken
+-- in the same instant would still read the old time and miss the reset. The sample's own sampled_at
+-- is explicit, so the wait changes nothing about what the row is dated.
 SELECT pg_stat_reset();
+\o
+SELECT pg_sleep(1);
+SELECT pg_stat_clear_snapshot();
+\o /dev/null
 SELECT sum(sampled)::int AS sampled, sum(below_floor)::int AS below_floor,
        sum(not_established)::int AS not_established
   FROM bloat_cause_sample(min_dead_pct => 0.1, min_dead_bytes => 0,
@@ -210,13 +238,44 @@ SELECT sum(sampled)::int AS sampled, sum(below_floor)::int AS below_floor,
 \o
 SELECT is((SELECT count(*)::int FROM bloat_cause_history
             WHERE relname = 'bc_h_reset'
-              AND sampled_at = current_setting('bc_h.t0')::timestamptz + interval '50 seconds'), 0,
-          'a sample taken across a pg_stat_reset() writes no row');
+              AND sampled_at = current_setting('bc_h.t0')::timestamptz + interval '50 seconds'), 1,
+          'a sample taken across a pg_stat_reset() writes a marker row');
+SELECT is((SELECT stats_reset FROM bloat_cause_history
+            WHERE relname = 'bc_h_reset'
+              AND sampled_at = current_setting('bc_h.t0')::timestamptz + interval '50 seconds'), true,
+          'flagged stats_reset = true, so the series re-baselines immediately');
+SELECT is((SELECT dead_rows FROM bloat_cause_history
+            WHERE relname = 'bc_h_reset'
+              AND sampled_at = current_setting('bc_h.t0')::timestamptz + interval '50 seconds'), NULL,
+          'the marker carries no figures: the change across the reset is not established');
 SELECT ok(:not_established::int >= 1,
           'and the return value counts it as not established rather than as sampled');
 SELECT is((SELECT count(*)::int FROM bloat_cause_history
             WHERE dead_rows_source IS DISTINCT FROM 'estimated'), 0,
           'every row the sampler writes is estimated: unknown is not a value dead_rows_source takes');
+
+-- The series resumes. The marker is now the previous row, so reset_at is no longer newer than
+-- prev_at and the next sample is ordinary. New dead rows put the table back in the findings, since
+-- the reset zeroed its counters; without the marker this sample, and every one after it, would be
+-- swallowed as "across a reset" and the table would never be sampled again.
+\o /dev/null
+UPDATE bc_h_reset SET v = 'paid' WHERE id <= 10;
+\o
+SELECT pg_temp.bc_h_wait('bc_h_reset');
+
+\o /dev/null
+SELECT sum(sampled)::int AS sampled, sum(below_floor)::int AS below_floor,
+       sum(not_established)::int AS not_established
+  FROM bloat_cause_sample(min_dead_pct => 0.1, min_dead_bytes => 0,
+                          sampled_at => current_setting('bc_h.t0')::timestamptz + interval '60 seconds')
+\gset
+\o
+SELECT is((SELECT count(*)::int FROM bloat_cause_history
+            WHERE relname = 'bc_h_reset'
+              AND sampled_at = current_setting('bc_h.t0')::timestamptz + interval '60 seconds'
+              AND stats_reset = false), 1,
+          'the next sample is an ordinary row with stats_reset = false, so the series resumed');
+SELECT ok(:sampled::int >= 1, 'and it is counted as sampled, not as not established');
 
 -- ---------------------------------------------------------------- pruning
 
@@ -231,8 +290,7 @@ ANALYZE bc_h_old;
 UPDATE bc_h_old SET v = 'paid' WHERE id % 2 = 0;
 DELETE FROM bloat_cause_history WHERE relname = 'bc_h_old';
 \o
-SELECT pg_sleep(1.5);
-SELECT pg_stat_clear_snapshot();
+SELECT pg_temp.bc_h_wait('bc_h_old');
 
 \o /dev/null
 SELECT sum(sampled)::int AS sampled, sum(below_floor)::int AS below_floor,
@@ -240,9 +298,13 @@ SELECT sum(sampled)::int AS sampled, sum(below_floor)::int AS below_floor,
   FROM bloat_cause_sample(min_dead_pct => 0.1, min_dead_bytes => 0,
                           sampled_at => current_setting('bc_h.t0')::timestamptz - interval '40 days')
 \gset
+SELECT (SELECT count(*)::int FROM bloat_cause_history
+         WHERE relname = 'bc_h_old'
+           AND sampled_at = current_setting('bc_h.t0')::timestamptz - interval '40 days') AS old_row
+\gset
 SELECT bloat_cause_prune(older_than => interval '35 days') AS pruned \gset
 \o
-SELECT is(:sampled::int, 1, 'the old fixture is sampled at the past instant');
+SELECT is(:old_row::int, 1, 'the old fixture is sampled at the past instant');
 SELECT ok(:pruned::bigint >= 1, 'bloat_cause_prune() drops samples older than the given age');
 SELECT is((SELECT count(*)::int FROM bloat_cause_history
             WHERE relname = 'bc_h_old'

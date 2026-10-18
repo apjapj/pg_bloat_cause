@@ -60,7 +60,21 @@ SELECT dead_bytes AS b, dead_bytes / 10 AS b10, dead_bytes / 100 AS b100,
        dead_bytes * 10 AS b10up
   FROM bloat_cause_findings() WHERE relname = 'bc_det' \gset
 \o
-SELECT plan(36);
+SELECT plan(47);
+
+-- Wait for a table to be back in bloat_cause_findings(), clearing the statistics snapshot between
+-- tries. A database-wide pg_stat_reset() zeroes the counters, and on a server with a separate
+-- statistics collector (14 and 15) they are repopulated asynchronously, so a fixed sleep is a race
+-- under load. The same wait test/02_history.sql uses.
+CREATE OR REPLACE FUNCTION pg_temp.bc_d_wait(rel text) RETURNS void LANGUAGE plpgsql AS $wait$
+BEGIN
+  FOR i IN 1..40 LOOP
+    PERFORM pg_stat_clear_snapshot();
+    EXIT WHEN EXISTS (SELECT 1 FROM bloat_cause_findings() WHERE relname = rel);
+    PERFORM pg_sleep(0.25);
+  END LOOP;
+END
+$wait$;
 
 SELECT ok(:b::bigint > 0, 'the fixture has estimated dead bytes to climb the ladder with');
 
@@ -203,10 +217,12 @@ SELECT is((SELECT count(*)::int FROM bloat_cause_alert WHERE subject = 'public.b
 -- ---------------------------------------------------------------- a reset is unknown, not resolved
 
 -- The same shape as the reset case in test/02, but through the sender. A sample taken before
--- pg_stat_reset() is the subject's latest sample; the reset then zeroes the counters and no row is
--- written across it. The table accumulates a few new dead rows, so it is still in the findings and
--- the clear path is reached. The sender must see that the latest sample predates the reset, call the
--- state unknown, and NOT send cleared. It decides this from the reset time, not from a marker row.
+-- pg_stat_reset() is the subject's latest sample; the reset then zeroes the counters and the sampler
+-- would write a marker row across it. The table accumulates a few new dead rows, so it is still in
+-- the findings and the clear path is reached. The sender must see that the latest sample predates
+-- the reset, call the state unknown, and NOT send cleared. Two signals make a subject unknown: a
+-- latest sample predating the reset time (below), and a latest sample flagged stats_reset = true
+-- (the marker path, asserted second).
 \o /dev/null
 DROP TABLE IF EXISTS bc_det_unk;
 CREATE TABLE bc_det_unk (id int PRIMARY KEY, v text) WITH (autovacuum_enabled = false);
@@ -253,6 +269,140 @@ SELECT is(:res_unk::int, 0,
 SELECT is((SELECT count(*)::int FROM bloat_cause_alert WHERE subject = 'public.bc_det_unk'), 1,
           'and its state is kept');
 
+-- The marker path: the sampler's post-reset row is flagged stats_reset = true and, because it is
+-- written by the first sample after the reset, it is dated after the reset. The reset-time comparison
+-- alone would see a known subject here; the flag is what holds it back.
+\o /dev/null
+INSERT INTO bloat_cause_history
+       (sampled_at, schemaname, relname, dead_rows, dead_pct, dead_bytes, dead_rows_source, stats_reset)
+VALUES (statement_timestamp(), 'public', 'bc_det_unk', NULL, NULL, NULL, 'estimated', true);
+\o
+SET search_path = bc_det_shadow, public, pg_catalog;
+SELECT bloat_cause_notify_resolved(min_dead_bytes => :u * 10) AS res_unk_marker \gset
+RESET search_path;
+\o
+SELECT is(:res_unk_marker::int, 0,
+          'a subject whose latest sample is a reset marker is unknown, not cleared');
+SELECT is((SELECT count(*)::int FROM bloat_cause_alert WHERE subject = 'public.bc_det_unk'), 1,
+          'and its state is kept with the marker, too');
+
+-- ---------------------------------------------------------------- a reset does not suppress an alert
+
+-- The guard in bloat_cause_notify_resolved() must mean "unknown, so no clear" and never "suppress
+-- alerts". bloat_cause_notify() walks the current findings and never consults the marker or the
+-- reset, so a table over the threshold right after a reset still raises a real onset.
+\o /dev/null
+DROP TABLE IF EXISTS bc_det_over;
+CREATE TABLE bc_det_over (id int PRIMARY KEY, v text) WITH (autovacuum_enabled = false);
+INSERT INTO bc_det_over SELECT g, 'new' FROM generate_series(1, 3000) g;
+ANALYZE bc_det_over;
+UPDATE bc_det_over SET v = 'paid' WHERE id % 2 = 0;
+\o
+SELECT pg_sleep(1.5);
+SELECT pg_stat_clear_snapshot();
+
+-- The reset moves the statistics reset time and zeroes every counter; the new dead rows put the
+-- table back in the findings above the threshold.
+\o /dev/null
+SELECT pg_stat_reset();
+UPDATE bc_det_over SET v = 'due' WHERE id % 3 = 0;
+\o
+SELECT pg_temp.bc_d_wait('bc_det_over');
+
+\o /dev/null
+SELECT dead_bytes AS ob FROM bloat_cause_findings() WHERE relname = 'bc_det_over' \gset
+SET search_path = bc_det_shadow, public, pg_catalog;
+SELECT bloat_cause_notify(min_dead_bytes => :ob) AS over_onset \gset
+RESET search_path;
+\o
+SELECT is(:over_onset::int, 1,
+          'a table over the threshold right after a reset still alerts: the reset does not suppress');
+SELECT is((SELECT count(*)::int FROM bc_det_shadow.notifications
+            WHERE payload::jsonb ->> 'subject' = 'public.bc_det_over'
+              AND payload::jsonb ->> 'event' = 'alerting'), 1,
+          'with one alerting payload for the subject');
+SELECT is((SELECT severity FROM bloat_cause_alert WHERE subject = 'public.bc_det_over'), 1,
+          'and the state records the onset');
+
+-- ---------------------------------------------------------------- the series resumes after a reset
+
+-- The persistence flaw, reproduced: write a pre-reset sample, reset, then sample again. Before the
+-- marker, the pre-reset row stayed the table's latest sample, so reset_at stayed newer than prev_at
+-- and every later sample wrote no row; the table was never sampled again until that row was pruned.
+-- The marker re-baselines the series: the first post-reset sample is flagged, the second is ordinary,
+-- and a new incident on the table alerts.
+\o /dev/null
+DROP TABLE IF EXISTS bc_det_persist;
+CREATE TABLE bc_det_persist (id int PRIMARY KEY, v text) WITH (autovacuum_enabled = false);
+INSERT INTO bc_det_persist SELECT g, 'new' FROM generate_series(1, 3000) g;
+ANALYZE bc_det_persist;
+UPDATE bc_det_persist SET v = 'paid' WHERE id % 2 = 0;
+DELETE FROM bloat_cause_history WHERE relname = 'bc_det_persist';
+\o
+SELECT pg_temp.bc_d_wait('bc_det_persist');
+
+\o /dev/null
+-- t0 is the moment this block starts. The pre-reset sample is backdated a second before it and the
+-- post-reset samples are a second and two seconds after it, so the samples straddle the reset time
+-- without depending on its resolution: on older servers the statistics reset time can be coarser than
+-- statement_timestamp(), and a sample dated in the same second as the reset could fall on the wrong
+-- side of it.
+SELECT set_config('bc_d.t0', statement_timestamp()::text, false);
+-- The pre-reset sample.
+SELECT sum(sampled)::int AS sampled FROM bloat_cause_sample(
+         min_dead_pct => 0.1, min_dead_bytes => 0,
+         sampled_at => current_setting('bc_d.t0')::timestamptz - interval '1 second') \gset
+-- The reset, then the first post-reset sample: the marker. The wait is for the reset time to
+-- propagate: on a server with a separate statistics collector (14 and 15) pg_stat_reset() updates
+-- pg_stat_get_db_stat_reset_time() asynchronously, and a sample taken in the same instant would still
+-- read the old time and miss the reset. The sample's own sampled_at is explicit, so the wait changes
+-- nothing about what the row is dated.
+SELECT pg_stat_reset();
+\o
+SELECT pg_sleep(1);
+SELECT pg_stat_clear_snapshot();
+\o /dev/null
+SELECT sum(not_established)::int AS nes FROM bloat_cause_sample(
+         min_dead_pct => 0.1, min_dead_bytes => 0,
+         sampled_at => current_setting('bc_d.t0')::timestamptz + interval '1 second') \gset
+-- New dead rows, then the second post-reset sample, which must be ordinary.
+UPDATE bc_det_persist SET v = 'late' WHERE id % 3 = 0;
+\o
+SELECT pg_temp.bc_d_wait('bc_det_persist');
+
+\o /dev/null
+SELECT sum(sampled)::int AS sampled2 FROM bloat_cause_sample(
+         min_dead_pct => 0.1, min_dead_bytes => 0,
+         sampled_at => current_setting('bc_d.t0')::timestamptz + interval '2 seconds') \gset
+\o
+SELECT is((SELECT count(*)::int FROM bloat_cause_history
+            WHERE relname = 'bc_det_persist'
+              AND sampled_at = current_setting('bc_d.t0')::timestamptz + interval '1 second'
+              AND stats_reset = true), 1,
+          'the first post-reset sample is the marker row');
+SELECT is((SELECT count(*)::int FROM bloat_cause_history
+            WHERE relname = 'bc_det_persist'
+              AND sampled_at = current_setting('bc_d.t0')::timestamptz + interval '2 seconds'
+              AND stats_reset = false), 1,
+          'the second post-reset sample is ordinary, so the series resumed');
+SELECT ok(:nes::int >= 1, 'and the marker sample is counted as not established');
+
+-- A new incident on the table alerts, because notify() reads the current findings and never treats
+-- the reset as suppression.
+\o /dev/null
+SELECT dead_bytes AS pb FROM bloat_cause_findings() WHERE relname = 'bc_det_persist' \gset
+SET search_path = bc_det_shadow, public, pg_catalog;
+SELECT bloat_cause_notify(min_dead_bytes => :pb) AS persist_onset \gset
+RESET search_path;
+\o
+SELECT is(:persist_onset::int, 1, 'a new incident on the table after the reset alerts');
+SELECT is((SELECT count(*)::int FROM bc_det_shadow.notifications
+            WHERE payload::jsonb ->> 'subject' = 'public.bc_det_persist'
+              AND payload::jsonb ->> 'event' = 'alerting'), 1,
+          'with one alerting payload for the subject');
+SELECT is((SELECT notify_count FROM bloat_cause_alert WHERE subject = 'public.bc_det_persist'), 1,
+          'and its state starts at level 1, a fresh onset');
+
 -- ---------------------------------------------------------------- cleanup
 
 \o /dev/null
@@ -260,6 +410,8 @@ DELETE FROM bloat_cause_history WHERE relname LIKE 'bc_det%';
 TRUNCATE bloat_cause_alert;
 DROP TABLE IF EXISTS bc_det_gone;
 DROP TABLE IF EXISTS bc_det_unk;
+DROP TABLE IF EXISTS bc_det_over;
+DROP TABLE IF EXISTS bc_det_persist;
 DROP SCHEMA IF EXISTS bc_det_shadow CASCADE;
 \o
 SELECT * FROM finish();
