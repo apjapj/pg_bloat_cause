@@ -62,20 +62,6 @@ SELECT dead_bytes AS b, dead_bytes / 10 AS b10, dead_bytes / 100 AS b100,
 \o
 SELECT plan(47);
 
--- Wait for a table to be back in bloat_cause_findings(), clearing the statistics snapshot between
--- tries. A database-wide pg_stat_reset() zeroes the counters, and on a server with a separate
--- statistics collector (14 and 15) they are repopulated asynchronously, so a fixed sleep is a race
--- under load. The same wait test/02_history.sql uses.
-CREATE OR REPLACE FUNCTION pg_temp.bc_d_wait(rel text) RETURNS void LANGUAGE plpgsql AS $wait$
-BEGIN
-  FOR i IN 1..40 LOOP
-    PERFORM pg_stat_clear_snapshot();
-    EXIT WHEN EXISTS (SELECT 1 FROM bloat_cause_findings() WHERE relname = rel);
-    PERFORM pg_sleep(0.25);
-  END LOOP;
-END
-$wait$;
-
 SELECT ok(:b::bigint > 0, 'the fixture has estimated dead bytes to climb the ladder with');
 
 -- ---------------------------------------------------------------- the objects
@@ -307,7 +293,8 @@ SELECT pg_stat_clear_snapshot();
 SELECT pg_stat_reset();
 UPDATE bc_det_over SET v = 'due' WHERE id % 3 = 0;
 \o
-SELECT pg_temp.bc_d_wait('bc_det_over');
+SELECT pg_sleep(1.5);
+SELECT pg_stat_clear_snapshot();
 
 \o /dev/null
 SELECT dead_bytes AS ob FROM bloat_cause_findings() WHERE relname = 'bc_det_over' \gset
@@ -339,7 +326,8 @@ ANALYZE bc_det_persist;
 UPDATE bc_det_persist SET v = 'paid' WHERE id % 2 = 0;
 DELETE FROM bloat_cause_history WHERE relname = 'bc_det_persist';
 \o
-SELECT pg_temp.bc_d_wait('bc_det_persist');
+SELECT pg_sleep(1.5);
+SELECT pg_stat_clear_snapshot();
 
 \o /dev/null
 -- t0 is the moment this block starts. The pre-reset sample is backdated a second before it and the
@@ -368,7 +356,8 @@ SELECT sum(not_established)::int AS nes FROM bloat_cause_sample(
 -- New dead rows, then the second post-reset sample, which must be ordinary.
 UPDATE bc_det_persist SET v = 'late' WHERE id % 3 = 0;
 \o
-SELECT pg_temp.bc_d_wait('bc_det_persist');
+SELECT pg_sleep(1.5);
+SELECT pg_stat_clear_snapshot();
 
 \o /dev/null
 SELECT sum(sampled)::int AS sampled2 FROM bloat_cause_sample(

@@ -30,21 +30,6 @@ SELECT set_config('bc_h.t0', statement_timestamp()::text, false);
 \o
 SELECT plan(28);
 
--- Wait for a table to be back in bloat_cause_findings(), clearing the statistics snapshot between
--- tries. A database-wide pg_stat_reset() zeroes the counters, and on a server with a separate
--- statistics collector (14 and 15) they are repopulated asynchronously, so a fixed sleep is a race
--- under load: this is the "statistics reach the view at transaction end" wait test/01 documents,
--- made bounded rather than fixed.
-CREATE OR REPLACE FUNCTION pg_temp.bc_h_wait(rel text) RETURNS void LANGUAGE plpgsql AS $wait$
-BEGIN
-  FOR i IN 1..40 LOOP
-    PERFORM pg_stat_clear_snapshot();
-    EXIT WHEN EXISTS (SELECT 1 FROM bloat_cause_findings() WHERE relname = rel);
-    PERFORM pg_sleep(0.25);
-  END LOOP;
-END
-$wait$;
-
 -- ---------------------------------------------------------------- the objects
 
 SELECT has_table('bloat_cause_history', 'the history table exists');
@@ -261,7 +246,8 @@ SELECT is((SELECT count(*)::int FROM bloat_cause_history
 \o /dev/null
 UPDATE bc_h_reset SET v = 'paid' WHERE id <= 10;
 \o
-SELECT pg_temp.bc_h_wait('bc_h_reset');
+SELECT pg_sleep(1.5);
+SELECT pg_stat_clear_snapshot();
 
 \o /dev/null
 SELECT sum(sampled)::int AS sampled, sum(below_floor)::int AS below_floor,
@@ -290,7 +276,8 @@ ANALYZE bc_h_old;
 UPDATE bc_h_old SET v = 'paid' WHERE id % 2 = 0;
 DELETE FROM bloat_cause_history WHERE relname = 'bc_h_old';
 \o
-SELECT pg_temp.bc_h_wait('bc_h_old');
+SELECT pg_sleep(1.5);
+SELECT pg_stat_clear_snapshot();
 
 \o /dev/null
 SELECT sum(sampled)::int AS sampled, sum(below_floor)::int AS below_floor,
