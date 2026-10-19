@@ -181,6 +181,22 @@ whether or not `pg_lock_tree` is installed, and there is no branch that could di
 actually wrong was three prose claims saying otherwise, corrected in 0.2. Deeper integration, naming
 a whole lock chain through `pg_lock_tree`, remains on the roadmap below.
 
+### Known flakes
+
+**2026-10-19, PG 14: one of two concurrent CI runs of the same commit failed `test/02_history.sql`
+and `test/03_detect.sql`; the other run and the rerun passed.** In `test/02`, the sample after a
+fixture update returned no row, so `sum(sampled)` was NULL, `\gset` left `:sampled` unset, and the next
+statement failed as a psql syntax error instead of an assertion. `test/03` counted two notifications
+where the test expected one.
+
+Both files wait for statistics with fixed `pg_sleep(1.5)` calls. A loaded runner can take longer, and
+the fixture is then read before its dead rows are visible. The fix is to poll for the expected
+condition (`n_dead_tup` or `dead_bytes`) with a timeout rather than raise the sleep, and to coalesce
+the aggregate so a missing row fails as an assertion. The container names and ports are also fixed per
+major (`bc-pri-14`, 5714), which is safe on GitHub-hosted runners but would collide if two jobs ever
+shared a Docker host. Until the waits are deterministic, rerun a lone PG 14 failure in these files
+before treating it as a defect.
+
 ## Open questions
 
 - Index bloat is not in the overview. B-tree bloat has different causes (deletion patterns, no
