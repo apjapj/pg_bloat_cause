@@ -4,8 +4,8 @@
 
 | Version | Supported | Why |
 |---|---|---|
-| 0.4.0 | **yes** | the current release, tagged `v0.4.0` |
-| 0.3.1 and older | no | superseded; update to 0.4 |
+| 0.4.1 | **yes** | the current release, tagged `v0.4.1` |
+| 0.4.0, 0.3.1, 0.3, 0.2, 0.1 | yes, by updating | `ALTER EXTENSION pg_bloat_cause UPDATE TO '0.4.1'`; 0.4.1 fixes the 0.3 to 0.3.1 update script, so a 0.3 or earlier database can now reach it |
 
 Fixes are made on `main` and released as a new version. Released tags are not edited.
 
