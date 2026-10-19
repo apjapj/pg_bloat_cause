@@ -62,7 +62,7 @@ jobs:
     # the committed evidence and the figures the docs cite, and `bash -n` parses every script.
     runs-on: docker
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: every database-free check
         run: |
           # node:20-bookworm carries python3 but not PyYAML, and a plain `yaml.safe_load` accepts a
@@ -92,7 +92,7 @@ jobs:
       PGPORT: "5432"
       BC_STANDBY_PORT: "5433"
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Start Postgres and the standby
         run: |
           set -euo pipefail
@@ -140,7 +140,7 @@ jobs:
       PGPORT: "5432"
       BC_STANDBY_PORT: "5433"
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Start Postgres and the standby
         run: |
           set -euo pipefail
@@ -186,7 +186,7 @@ jobs:
       PGHOST: 127.0.0.1
       PGPORT: "5432"
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Start Postgres and install the extension
         run: |
           set -euo pipefail
