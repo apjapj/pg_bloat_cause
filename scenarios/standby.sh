@@ -17,6 +17,11 @@ if [ "${2:-}" = down ]; then docker rm -f -v "$pri" "$sby" >/dev/null 2>&1; dock
 pport=$2; sport=$3
 # The image defaults to the local pg-dev-infra one; CI passes BC_IMAGE, built from ci/Dockerfile.
 image=${BC_IMAGE:-pg-dev-infra-pg$v}
+# Start fresh, by exact name. A run killed before its EXIT trap leaves bc-pri-$v and bc-sby-$v Up,
+# because --rm removes a container only when it stops; the next run then fails with "container name
+# ... is already in use" or talks to the stale server, which is how a stale database once answered a
+# no-pgstattuple check. Remove exactly these two own containers first, never a broad selector.
+docker rm -f -v "$pri" "$sby" >/dev/null 2>&1
 docker network create "$net" >/dev/null 2>&1 || true
 docker run -d --rm --name "$pri" --network "$net" -p 127.0.0.1:"$pport":5432 -e POSTGRES_PASSWORD=test \
     "$image" postgres -c wal_level=logical -c max_prepared_transactions=10 \
