@@ -104,6 +104,57 @@ else
     fi
 fi
 
+# A document can name the wrong version as "the current release" while using none of the banned
+# phrases above. SECURITY.md did exactly that: its supported-versions table called 0.4 the current
+# release while the control file and the tag both said 0.4.0, and every check above passed, because
+# they read version tokens and banned phrases, never a claim about which version is current. The
+# .control default_version is the one place the current version is declared, so a "current release"
+# claim must name it. This is the check the release-state one above cannot make.
+step "a version a document calls the current release is the .control default_version"
+if [ -n "$ver" ]; then
+    cur_bad=""
+    for f in $CLAIM_DOCS; do
+        [ -f "$f" ] || continue
+        while IFS= read -r hit; do
+            [ -n "$hit" ] || continue
+            ln=${hit%%:*}
+            text=${hit#*:}
+            # Only a table row makes a machine-readable "this version is current" claim. Prose that
+            # says a document once named a version current is history, not a claim, so it is skipped.
+            printf '%s\n' "$text" | grep -qE '^[[:space:]]*\|' || continue
+            v=$(printf '%s\n' "$text" | grep -oE 'v?[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1 | sed 's/^v//')
+            [ -n "$v" ] || continue
+            [ "$v" = "$ver" ] || cur_bad="$cur_bad $f:$ln($v)"
+        done < <(grep -nE 'current release' "$f" 2>/dev/null || true)
+    done
+    if [ -z "$cur_bad" ]; then
+        ok "every 'current release' claim names $ver, the .control default_version"
+    else
+        bad "the .control default_version is $ver, but these call a different version current:$cur_bad"
+    fi
+else
+    ok "no .control default_version, so there is no current version to claim"
+fi
+
+step "the control version has a release tag"
+
+# The control file's version is what README, INSTALL.md and SECURITY.md tell a reader to check out
+# or update to, and a tag is what pins that version for anyone who does not know the hash. 0.4.0 was
+# named the current release in SECURITY.md and tagged nowhere, which took a person reading the pages
+# side by side to notice. A shallow clone carries no tags, so when none is present the check says so
+# rather than failing; and the gap between bumping the version and cutting the tag is real, so it is
+# waived for that window with LINT_ALLOW_UNTAGGED_RELEASE=1.
+taglist=$(git tag 2>/dev/null)
+if [ "${tagcount:-0}" -eq 0 ]; then
+    ok "no release tags in this checkout, so the control version's tag cannot be checked"
+elif grep -qx "v$ver" <<<"$taglist"; then
+    ok "the control version $ver has its tag, v$ver"
+elif [ "${LINT_ALLOW_UNTAGGED_RELEASE:-0}" = "1" ]; then
+    ok "control version $ver has no tag, which LINT_ALLOW_UNTAGGED_RELEASE=1 allows"
+else
+    bad "control version is $ver but there is no v$ver tag: tag it, or set LINT_ALLOW_UNTAGGED_RELEASE=1 while the bump awaits its tag"
+fi
+
 # Every release and update script must be installed: either listed literally in DATA, or
 # covered by a wildcard in the Makefile. pg_lock_tree installs update paths via a UPGRADES
 # wildcard; runway lists them in DATA. Both are correct, so both are accepted.

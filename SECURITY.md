@@ -4,7 +4,7 @@
 
 | Version | Supported | Why |
 |---|---|---|
-| 0.4 | **yes** | the current release, tagged `v0.4.0` |
+| 0.4.0 | **yes** | the current release, tagged `v0.4.0` |
 | 0.3.1 and older | no | superseded; update to 0.4 |
 
 Fixes are made on `main` and released as a new version. Released tags are not edited.
