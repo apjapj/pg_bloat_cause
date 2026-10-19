@@ -5,9 +5,11 @@ of the four entry points to call. This page is the shapes. For why the causes ra
 they do, see [ranking.md](ranking.md); for the design decisions behind them, see
 [design.md](design.md).
 
-Everything here is read-only. Nothing in this extension writes to a cluster, and nothing
-waits on a lock: a table that cannot be examined in time is reported as not established
-rather than stalling the caller.
+Everything here that reads is read-only. Through 0.3.1 nothing in this extension wrote to a cluster
+and nothing waited on a lock: a table that could not be examined in time was reported as not
+established rather than stalling the caller. From 0.4.0 the sampler and the two senders are the
+exception, and they write only this extension's own tables (`bloat_cause_history` and
+`bloat_cause_alert`), never a user table. Everything else stays read-only.
 
 ## Which entry point to call
 
@@ -130,6 +132,68 @@ disconnect themselves mid-query.
 Formats an interval for the sentences: days when it is two days or more, hours when it is two
 hours or more, and so on down to seconds. Returns `text`. It reads nothing, which is why it is
 the one function here that is executable by `PUBLIC`.
+
+## `bloat_cause_history` (table)
+
+The sampled series, one row per table per sample (primary key `schemaname, relname, sampled_at`).
+Registered with `pg_extension_config_dump`, so `pg_dump` carries it.
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `sampled_at` | `timestamptz` | The instant the sample is about. |
+| `schemaname` | `name` | Schema of the table. |
+| `relname` | `name` | Table name. |
+| `dead_rows` | `bigint` | Estimated dead rows. |
+| `dead_pct` | `numeric` | Estimated dead share. |
+| `dead_bytes` | `bigint` | Estimated reclaimable bytes. |
+| `dead_rows_source` | `text` | Always `estimated` in 0.4.0: the view and the sampler report estimates, the reset marker included. `unknown` is not a value it takes. |
+| `stats_reset` | `boolean` | `true` only on the marker row a sample writes across a `pg_stat_reset()` or crash recovery; `false` on every ordinary row. The marker carries NULL figures and re-baselines the series. |
+| `holder_pid` | `int` | The horizon holder's pid when the cause was `horizon holder`, else NULL. |
+| `holder_xid_age` | `interval` | How long that holder had run, else NULL. |
+| `holder_slot` | `text` | The replication slot when a slot was the holder, else NULL. |
+| `holder_query` | `text` | Always NULL in 0.4.0: storing query text needs an explicit opt-in. |
+
+## `bloat_cause_sample(min_dead_pct numeric DEFAULT 0.1, min_dead_bytes bigint DEFAULT 0, sampled_at timestamptz DEFAULT NULL)`
+
+Appends one sample of every table worth a row: at or above both floors, or already in the history,
+so a series that starts does not silently stop. Returns one row per cause with `sampled`,
+`below_floor` and `not_established` counts. It reads `bloat_cause_findings()` and never measures, so
+it needs no `pgstattuple`. A sample taken across a `pg_stat_reset()` writes a marker row with
+`stats_reset = true` and NULL figures, and is counted in `not_established`: the marker re-baselines
+the series, so the next sample is ordinary, and `dead_rows_source` stays `estimated`. A role granted
+the sampler samples only the tables it can read. Schedule it; the `sampled_at` argument is for
+fixtures.
+
+## `bloat_cause_prune(older_than interval DEFAULT '35 days')`
+
+Deletes samples older than the given age and returns the count.
+
+## `bloat_cause_notify(channel text DEFAULT 'bloat_cause', min_dead_pct numeric DEFAULT 0.1, min_dead_bytes bigint DEFAULT 104857600, min_holder_age interval DEFAULT '1 minute')`
+
+Raises one `NOTIFY` on `channel` when a table is BOTH at least `min_dead_pct` dead AND at least
+`min_dead_bytes` of dead space, and again each time it crosses the next ten-times rung above
+`min_dead_bytes` (which is the first rung and has no fixed top). The rung is compared against the
+highest already notified, never against the previous sample, so a table that sits still notifies
+once. Returns how many notifications it raised. The payload is the shared `pg_incident_watch`
+contract: `tool`, `subject` (the schema-qualified relation name), `sampled_at`, `channel`, `event`,
+`level`, `previous_level`, `dead_rows`, `dead_pct`, `dead_bytes`, `dead_rows_source`, `cause` and
+`cause_detail`. A statistics reset cannot suppress an alert: this reads the current findings and
+never consults the history or the `stats_reset` marker, so a table over the threshold after a reset
+still alerts and a higher rung after a reset still escalates.
+
+## `bloat_cause_notify_resolved(channel text DEFAULT 'bloat_cause', min_dead_pct numeric DEFAULT 0.1, min_dead_bytes bigint DEFAULT 104857600, min_holder_age interval DEFAULT '1 minute')`
+
+Raises one `cleared` `NOTIFY` per subject that had alerted and is still watched (present in
+`bloat_cause_findings()`) but is now below the alert threshold, then forgets its state. A table that
+has left the findings is not watched and is not cleared, and a subject whose most recent sample is a
+reset marker (`stats_reset = true`) or is older than the current statistics reset time is unknown and
+is not cleared either. The `cleared` payload carries `level` (the last level reached) with
+`previous_level` absent.
+
+## `bloat_cause_alert` (table)
+
+The state the two senders share, one row per subject per channel, holding the severity (rung) last
+notified and the notification count. Managed by the senders; do not edit it by hand.
 
 ## Grants
 

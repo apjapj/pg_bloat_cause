@@ -48,6 +48,23 @@ So for a role without `pg_read_all_stats`, every row carries a "not established"
 holding these rows back would not appear, and the cause it gives is only what it can establish.
 `test/01_bloat_cause.sql` asserts that as a real role, alongside a role with no grants being refused.
 
+**For the sampler, the pruner and the senders (0.4.0).** A role that runs the scheduled sample and
+the two senders needs the reads above plus these, which are not open by default because they write:
+
+```sql
+GRANT EXECUTE ON FUNCTION bloat_cause_sample(numeric, bigint, timestamptz),
+                          bloat_cause_prune(interval),
+                          bloat_cause_notify(text, numeric, bigint, interval),
+                          bloat_cause_notify_resolved(text, numeric, bigint, interval) TO monitoring;
+GRANT SELECT, INSERT, DELETE ON bloat_cause_history TO monitoring;
+GRANT SELECT, INSERT, UPDATE, DELETE ON bloat_cause_alert TO monitoring;
+```
+
+`bloat_cause_sample()` calls `bloat_cause_findings()` with the caller's rights, so the `EXECUTE` on
+`findings()` above is needed as well. `bloat_cause_prune()` needs `DELETE` on the history;
+`bloat_cause_notify()` writes and updates `bloat_cause_alert`; `bloat_cause_notify_resolved()` reads
+the history to tell a reset sample from a clear, and deletes from the alert state.
+
 **Why not SECURITY DEFINER**, as pg_lock_tree's `lock_tree_sample()` is. That function writes, and needs
 its owner's rights to. These only read, and as definer they would show other users' sessions to any role
 granted EXECUTE, bypassing `pg_read_all_stats`, and the note telling a role what it cannot see could never
@@ -59,9 +76,12 @@ role, and `pg_relation_size()` needs no privilege on the table.
 ## What it reads, and what it never does
 
 It reads `pg_stat_user_tables`, `pg_class`, `pg_stat_activity`, `pg_locks`, `pg_prepared_xacts`,
-`pg_replication_slots` and `pg_stat_replication`. It writes nothing, runs no VACUUM, keeps no history
-and sends no `NOTIFY` in 0.1; every function in it is `STABLE` or `IMMUTABLE`, and the test suite
-asserts that none is `VOLATILE`.
+`pg_replication_slots` and `pg_stat_replication`. Through 0.3.1 it wrote nothing, ran no VACUUM and
+kept no state; every function was `STABLE` or `IMMUTABLE`. From 0.4.0 `bloat_cause_sample()` writes
+one row per sampled table to `bloat_cause_history`, `bloat_cause_prune()` deletes old rows from it,
+and the two senders write `bloat_cause_alert` and raise `NOTIFY`; those four are `VOLATILE` and
+`test/01_bloat_cause.sql` names them. It still writes no user table, runs no VACUUM, and never calls
+`pgstattuple` implicitly: the sampler reads the estimate only.
 
 ## Tests
 

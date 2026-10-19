@@ -11,7 +11,7 @@ SET client_min_messages = warning;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 CREATE EXTENSION IF NOT EXISTS pg_bloat_cause;
 \o
-SELECT plan(55);
+SELECT plan(56);
 
 SELECT has_view('bloat_cause', 'the bloat_cause view exists');
 SELECT has_function('bloat_cause_findings', ARRAY['interval', 'bigint'], 'bloat_cause_findings(interval, bigint) exists');
@@ -23,11 +23,21 @@ SELECT columns_are('bloat_cause',
         'cause', 'cause_detail', 'cause_since', 'then', 'unknowns'],
   'bloat_cause has the columns docs/design.md describes, including cause, then and unknowns');
 
--- Read-only, stated in the catalog: nothing here is VOLATILE, so nothing can be writing.
+-- Read-only, stated in the catalog: every function that only reads is non-VOLATILE. The four that
+-- write their own tables (the sampler, the pruner and the two senders, added in 0.4.0) are
+-- deliberately VOLATILE and are named here, so a reader that quietly starts writing would fail.
 SELECT is((SELECT count(*)::int FROM pg_proc p JOIN pg_depend d ON d.objid = p.oid
             JOIN pg_extension e ON e.oid = d.refobjid AND e.extname = 'pg_bloat_cause'
-           WHERE p.provolatile = 'v'), 0,
-          'no function in the extension is VOLATILE: it reads and never writes');
+           WHERE p.provolatile = 'v'
+             AND p.proname NOT IN ('bloat_cause_sample', 'bloat_cause_prune',
+                                   'bloat_cause_notify', 'bloat_cause_notify_resolved')), 0,
+          'no function in the extension is VOLATILE except the sampler, the pruner and the senders');
+SELECT is((SELECT count(*)::int FROM pg_proc p JOIN pg_depend d ON d.objid = p.oid
+            JOIN pg_extension e ON e.oid = d.refobjid AND e.extname = 'pg_bloat_cause'
+           WHERE p.provolatile = 'v'
+             AND p.proname IN ('bloat_cause_sample', 'bloat_cause_prune',
+                               'bloat_cause_notify', 'bloat_cause_notify_resolved')), 4,
+          'and those four are VOLATILE, because they write their own tables');
 
 -- A fixture that needs no second session: autovacuum disabled, half the rows dead.
 \o /dev/null
@@ -292,10 +302,12 @@ SELECT is(bloat_cause_age(interval '3 days 4 hours'), '3 days', 'ages of two day
             (SELECT count(*)::int FROM bloat_cause_command() WHERE cause = 'autovacuum disabled'),
             'every autovacuum-disabled row returns a SELECT, and it is never empty');
   -- A returned statement must never contain an unbalanced quote, which is what splicing a gid would
-  -- cause. Counting quotes is crude but it is the property that matters and it needs no fixture.
+  -- cause. Counting quotes is crude but it is the property that matters and it needs no fixture. It
+  -- asserts an EVEN count, not a minimum: a statement with no quotes at all (VACUUM (VERBOSE)
+  -- schema.table) is balanced, and the earlier "< 2" clause failed on it whenever any table in the
+  -- database had the "autovacuum behind" cause, which the fixture does not but a leftover table can.
   SELECT is((SELECT count(*)::int FROM bloat_cause_command()
-              WHERE length(command) - length(replace(command, '''', '')) < 2
-                 OR length(command) - length(replace(command, '''', '')) % 2 <> 0),
+              WHERE length(command) - length(replace(command, '''', '')) % 2 <> 0),
             0, 'every returned statement has balanced single quotes');
   -- And the row count must equal the finding count, so the command never invents or drops a table.
   SELECT is((SELECT count(*)::int FROM bloat_cause_command()),
