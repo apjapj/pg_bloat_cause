@@ -113,7 +113,11 @@ reverse of the fix as `<id>.patch` with its `.meta` beside it; `defects/README.m
    differently.
 4. Update the README status line and any document that names the version. The lint
    fails if a document claims the release is untagged or unreleased while a tag exists,
-   and fails if the README header does not mention the current version.
+   fails if a "current release" row names a version other than the `.control`
+   `default_version`, and fails if the control version has no `vX.Y` tag. The last one is
+   the bump-to-tag window: set `LINT_ALLOW_UNTAGGED_RELEASE=1` to run the lint there, and
+   drop it once the tag is cut. It also fails if the README header does not mention the
+   current version.
 5. `make lint`, `make prove` on 14 and 18, and the scenario suite green on both.
 6. Tag it, one name at a time, never with `--tags`. A released tag is never edited,
    never amended and never moved.
