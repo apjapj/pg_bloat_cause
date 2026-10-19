@@ -36,7 +36,7 @@
 -- cover, and is the default because pgstattuple() reads the whole table. 'exact' is there for a table
 -- small enough that the difference does not matter, which is the caller's judgement and not this
 -- function's.
-CREATE FUNCTION @extschema@.bloat_cause_measure(schema name, table_name name, mode text DEFAULT 'approx')
+CREATE OR REPLACE FUNCTION @extschema@.bloat_cause_measure(schema name, table_name name, mode text DEFAULT 'approx')
 RETURNS TABLE (
   schemaname       name,
   relname          name,

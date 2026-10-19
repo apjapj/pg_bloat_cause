@@ -3,6 +3,18 @@
 Versions are listed newest first. Released tags are never edited: a change that needs
 a new entry gets a new version.
 
+## 0.4.1 (2026-10-19)
+
+A patch release with no SQL change, fixing the update path from 0.3 and earlier.
+
+The 0.3 to 0.3.1 script used `CREATE FUNCTION` for `bloat_cause_measure`, although its own comment
+says "CREATE OR REPLACE, not DROP" and the signature is unchanged. A database at 0.3, or at 0.1 or
+0.2 which reach 0.3.1 through it, therefore failed with "function bloat_cause_measure already
+exists with same argument types" and could not update. The script is corrected to `CREATE OR
+REPLACE`; the `v0.3.1` tag is unchanged, and this release ships the corrected script.
+
+Nothing else changes: 0.4.1's SQL is 0.4.0's, and the 0.4.0 to 0.4.1 update is a version bump.
+
 ## 0.4.0 (2026-10-18)
 
 Step 6: the sampler, the history, the pruner and the two senders of the shared `pg_incident_watch`
