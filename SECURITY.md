@@ -4,8 +4,8 @@
 
 | Version | Supported | Why |
 |---|---|---|
-| 0.4.1 | **yes** | the current release, tagged `v0.4.1` |
-| 0.4.0, 0.3.1, 0.3, 0.2, 0.1 | yes, by updating | `ALTER EXTENSION pg_bloat_cause UPDATE TO '0.4.1'`; 0.4.1 fixes the 0.3 to 0.3.1 update script, so a 0.3 or earlier database can now reach it |
+| 0.5.0 | **yes** | the current release, tagged `v0.5.0` |
+| 0.4.1, 0.4.0, 0.3.1, 0.3, 0.2, 0.1 | yes, by updating | `ALTER EXTENSION pg_bloat_cause UPDATE TO '0.5.0'`; 0.5.0 replaces `bloat_cause_sample()` only, so any earlier version reaches it |
 
 Fixes are made on `main` and released as a new version. Released tags are not edited.
 
@@ -44,5 +44,12 @@ of them touches a user table. So the issues that matter most are about privilege
 - anything in the extension writing, locking for longer than a catalog read, or running code as
   another role, for example through an unqualified name and `search_path`;
 - a role with no grants able to call a function: all are revoked from `PUBLIC` by default.
+
+The `holder_query` column, added in 0.5.0, is query text and is therefore untrusted input as well as
+output. It is only written when the session sets `bloat_cause.holder_query` on (off by default), and
+`bloat_cause_sample()` redacts the credential shapes [docs/holder-query.md](docs/holder-query.md)
+lists, but that is best-effort: a stored value can still contain a secret. A reader with `SELECT` on
+`bloat_cause_history` can read it, and it is worth reporting if a credential shape on that list
+survives, or if the sampler stores query text with the setting off.
 
 A finding that names the wrong cause is a bug, not a vulnerability; please open an ordinary issue.

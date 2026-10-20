@@ -65,6 +65,14 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON bloat_cause_alert TO monitoring;
 `bloat_cause_notify()` writes and updates `bloat_cause_alert`; `bloat_cause_notify_resolved()` reads
 the history to tell a reset sample from a clear, and deletes from the alert state.
 
+**The `holder_query` opt-in (0.5.0).** A sample stores the horizon holder's query text only when the
+sampling session sets the boolean `bloat_cause.holder_query` on; it is off by default and an off
+sample writes NULL. It is a per-session GUC, so a job sets it in its own session (or `ALTER SYSTEM`
+for the whole cluster). The stored text is redacted of the credential shapes
+[docs/holder-query.md](docs/holder-query.md) lists, but the redaction is best-effort: anyone who can
+read `bloat_cause_history` should treat `holder_query` as untrusted text that may still contain a
+secret, and clear it with `UPDATE bloat_cause_history SET holder_query = NULL` if needed.
+
 **Why not SECURITY DEFINER**, as pg_lock_tree's `lock_tree_sample()` is. That function writes, and needs
 its owner's rights to. These only read, and as definer they would show other users' sessions to any role
 granted EXECUTE, bypassing `pg_read_all_stats`, and the note telling a role what it cannot see could never

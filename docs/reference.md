@@ -151,7 +151,7 @@ Registered with `pg_extension_config_dump`, so `pg_dump` carries it.
 | `holder_pid` | `int` | The horizon holder's pid when the cause was `horizon holder`, else NULL. |
 | `holder_xid_age` | `interval` | How long that holder had run, else NULL. |
 | `holder_slot` | `text` | The replication slot when a slot was the holder, else NULL. |
-| `holder_query` | `text` | Always NULL in 0.4.0: storing query text needs an explicit opt-in. |
+| `holder_query` | `text` | NULL unless the session set `bloat_cause.holder_query` on, the holder was a session (not a prepared transaction or a standby), and the cause was `horizon holder`. Then it is the holder's first statement, with the credential shapes in [holder-query.md](holder-query.md) redacted and the text marked `[truncated]` when it reaches the server's query-text limit. Best-effort: it can still contain secrets, so treat it as untrusted text. |
 
 ## `bloat_cause_sample(min_dead_pct numeric DEFAULT 0.1, min_dead_bytes bigint DEFAULT 0, sampled_at timestamptz DEFAULT NULL)`
 

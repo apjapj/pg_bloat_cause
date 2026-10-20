@@ -3,6 +3,28 @@
 Versions are listed newest first. Released tags are never edited: a change that needs
 a new entry gets a new version.
 
+## 0.5.0 (2026-10-20)
+
+The `holder_query` opt-in, from [docs/holder-query.md](docs/holder-query.md). A new release script,
+`pg_bloat_cause--0.5.0.sql`, and an update path from 0.4.1.
+
+- `bloat_cause_history.holder_query` stops being permanently NULL. When a session sets the boolean
+  `bloat_cause.holder_query` on, an ordinary sample stores the horizon holder's **first statement**,
+  redacted and marked, instead of NULL. Off is the default and an off sample stores NULL on every
+  row, exactly as 0.4.x did.
+- The redaction is **best-effort**: it strips the literal after `PASSWORD` in `CREATE ROLE`,
+  `CREATE USER`, `ALTER ROLE` and `ALTER USER` (so `ENCRYPTED PASSWORD` too), and `password=` in the
+  connection strings of `CREATE SUBSCRIPTION ... CONNECTION` and `dblink_connect`. It does not touch
+  an ordinary `UPDATE ... password =`. The opt-in is the real control: the column can still contain
+  secrets, and the documented cleanup is `UPDATE bloat_cause_history SET holder_query = NULL`.
+- The stored text is marked `[truncated]` when it reaches the server's `track_activity_query_size`
+  limit (read at sample time) or the sampler's own 1024 bytes, because `pg_stat_activity` cannot say
+  whether it cut the text.
+- Nothing else changes: the update replaces `bloat_cause_sample()` only. The history table and the
+  `holder_query` column already exist, so no rewrite, and rows sampled before the opt-in stay NULL.
+  `bloat_cause_findings()`, `bloat_cause_text()`, `bloat_cause_holder()`, `bloat_cause_command()` and
+  `bloat_cause_measure()` keep their shapes.
+
 ## 0.4.1 (2026-10-19)
 
 A patch release with no SQL change, fixing the update path from 0.3 and earlier.
