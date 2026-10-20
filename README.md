@@ -181,8 +181,8 @@ have to be redacted on every sample. The contract is settled in
 shared PG matrix. Tests run with and without pgstattuple and pg_lock_tree.
 
 Done: [INSTALL.md](INSTALL.md), [docs/reference.md](docs/reference.md), and the PG matrix, which **runs
-14 to 18** on every push. 19 is deliberately not in it: its image needs the `include` form and a separate
-apt major, as pg_lock_tree's workflow does it. That is an open item rather than a done one.
+14 to 19** on every push. 19 is the current pre-release (`19beta4`) and uses the `include` form and a
+separate apt major, as pg_lock_tree's workflow does.
 
 The with-and-without-`pgstattuple` matrix leg was the gap here, and step 6 closed it: `ci/job.sh`
 removes `pgstattuple` from both servers after the first scenario pass and runs the scenarios again,
