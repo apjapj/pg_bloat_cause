@@ -11,6 +11,21 @@ PostgreSQL 14 and 18. Install and grants: [INSTALL.md](INSTALL.md). What changed
 release: [CHANGELOG.md](CHANGELOG.md). Changing it or releasing it:
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## The incident, end to end
+
+This tool answers one question; the family covers the rest, and the three install independently.
+They share the alert contract and the reference listener in
+[pg_incident_watch](https://github.com/apjapj/pg_incident_watch).
+
+| Tool | Question it answers |
+|---|---|
+| [pg_lock_tree](https://github.com/apjapj/pg_lock_tree) | what is stuck now |
+| [pg_bloat_cause](https://github.com/apjapj/pg_bloat_cause) | what is slowing down |
+| [pg_limit_runway](https://github.com/apjapj/pg_limit_runway) | what will break next |
+
+The umbrella also tests all three in one database, so installing more than one is a supported
+combination rather than an accident.
+
 ## Overview
 
 Bloat tools report how big a table is and how much of it is dead. That is the symptom, and it leaves
