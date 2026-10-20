@@ -1,5 +1,5 @@
---- a/pg_bloat_cause--0.4.1.sql
-+++ b/pg_bloat_cause--0.4.1.sql
+--- a/pg_bloat_cause--0.5.0.sql
++++ b/pg_bloat_cause--0.5.0.sql
 @@ -607,10 +607,10 @@
      -- up a RELATION NAMED 19223, which does not exist: 'relation "19223" does not exist'. Casting the
      -- oid avoids a name lookup entirely, which is both correct and safer, because resolving a name
