@@ -2,7 +2,7 @@
 
 Short version of what CI runs and what it will not catch for you. `pg_lock_tree`'s
 CONTRIBUTING.md is the long version and is worth reading once; this file is what
-applies to a repository with 15 scenarios, 152 tests and seven release scripts.
+applies to a repository with 15 scenarios, 152 tests and thirteen release and update scripts.
 
 ## Make targets
 
@@ -13,7 +13,7 @@ applies to a repository with 15 scenarios, 152 tests and seven release scripts.
 | `make lint` | Three scripts, no database: `scripts/lint-docs.sh`, `scenarios/check-evidence.sh`, `scripts/check-workflows.sh`. | Nothing. Safe anywhere, cheap enough for a pre-commit hook. |
 | `make defects` | Re-injects every defect in `defects/` and requires the test that caught it to fail again; `PG=18` picks the server image. | Docker, `pg_prove` and `patch`. Not part of `make lint`. |
 
-CI runs `make lint` and the tests on PostgreSQL 14 and 18, and runs the scenario suite in
+CI runs `make lint` and the tests on PostgreSQL 14 to 19, and runs the scenario suite in
 a container built from `ci/Dockerfile`. It does not run `make install` against your
 machine, so an install that works in CI and not locally is a bug in the `DATA` list or in
 `scenarios/install-extension.sh`, and both are checked by the lint.
@@ -37,7 +37,8 @@ breaks one will go red rather than pass quietly.
 
 ## Tests
 
-`test/01_bloat_cause.sql` is one file with `plan(55)`. The plan must match the number of
+`test/01_bloat_cause.sql` is `plan(56)`, `test/02_history.sql` is `plan(28)`, `test/03_detect.sql`
+is `plan(47)` and `test/04_holder_query.sql` is `plan(21)`. The plans must match the number of
 assertions; the lint does not check that here, so if you add an assertion, count it.
 
 ### A test that cannot fail is not a test
@@ -118,7 +119,7 @@ reverse of the fix as `<id>.patch` with its `.meta` beside it; `defects/README.m
    the bump-to-tag window: set `LINT_ALLOW_UNTAGGED_RELEASE=1` to run the lint there, and
    drop it once the tag is cut. It also fails if the README header does not mention the
    current version.
-5. `make lint`, `make prove` on 14 and 18, and the scenario suite green on both.
+5. `make lint`, `make prove` on 14 to 19, and the scenario suite green on all of them.
 6. Tag it, one name at a time, never with `--tags`. A released tag is never edited,
    never amended and never moved.
 
@@ -148,3 +149,17 @@ quietly break the posture the others keep:
 
 No em-dashes or en-dashes in any document, comment, script or workflow. The lint checks
 it, and a reader's eye catches it before anything else.
+
+### Versions in prose
+
+CI runs every PostgreSQL version the matrix declares: 14, 15, 16, 17, 18 and 19beta4, all of
+them, with no hole. Two kinds of sentence name versions, and they are not the same claim:
+
+- A document that states **current coverage** names the matrix range, `14 to 19`.
+  `scripts/check-pg-matrix-claims.sh` checks these against the workflow.
+- A document that records a **past measurement** names the versions it was measured on,
+  which may be fewer than the matrix: `measured on 14 and 18` stays as written. Nothing
+  checks these, because the number was true when it was written.
+
+Do not widen a past measurement to look current, and do not narrow a coverage claim to
+the ends of the matrix.

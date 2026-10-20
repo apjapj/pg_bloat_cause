@@ -7,9 +7,9 @@
 
 Part of [pg_incident_watch](https://github.com/apjapj/pg_incident_watch). Pure SQL, `CREATE EXTENSION pg_bloat_cause`, no
 restart, no `shared_preload_libraries`. Status: **0.5.0**, built and tested on
-PostgreSQL 14 and 18. Install and grants: [INSTALL.md](INSTALL.md). What changed in each
-release: [CHANGELOG.md](CHANGELOG.md). Changing it or releasing it:
-[CONTRIBUTING.md](CONTRIBUTING.md).
+PostgreSQL 14 to 19, where 19 is the current pre-release (`19beta4`). Install and grants:
+[INSTALL.md](INSTALL.md). What changed in each release: [CHANGELOG.md](CHANGELOG.md). Changing
+it or releasing it: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## The incident, end to end
 
@@ -106,7 +106,7 @@ there, so every later step has something to be right about. At least:
 Each scenario should also print what the usual hand-written query reports, so the README can show
 the difference rather than claim it.
 
-**Done, in [`scenarios/`](scenarios/README.md).** All nine run on PostgreSQL 14 and 18, plus s10 and
+**Done, in [`scenarios/`](scenarios/README.md).** All nine run on PostgreSQL 14 to 19, plus s10 and
 s11 for the never-vacuumed case in [docs/ranking.md](docs/ranking.md); s3 needs a
 primary/standby pair, which `scenarios/standby.sh` builds. Four of them corrected this document: the
 logical-slot example above, the lock row in the causes table, the threshold row, and where a
@@ -207,13 +207,17 @@ fixture update returned no row, so `sum(sampled)` was NULL, `\gset` left `:sampl
 statement failed as a psql syntax error instead of an assertion. `test/03` counted two notifications
 where the test expected one.
 
-Both files wait for statistics with fixed `pg_sleep(1.5)` calls. A loaded runner can take longer, and
-the fixture is then read before its dead rows are visible. The fix is to poll for the expected
-condition (`n_dead_tup` or `dead_bytes`) with a timeout rather than raise the sleep, and to coalesce
-the aggregate so a missing row fails as an assertion. The container names and ports are also fixed per
-major (`bc-pri-14`, 5714), which is safe on GitHub-hosted runners but would collide if two jobs ever
-shared a Docker host. Until the waits are deterministic, rerun a lone PG 14 failure in these files
-before treating it as a defect.
+**Fixed, in three parts, and not by polling.** The wait for the statistics collector is now a bounded
+`pg_sleep(10)` rather than `pg_sleep(1.5)`: a loaded runner can take longer than a second and a half,
+and the fixture was then read before its dead rows were visible. The aggregates are coalesced, so a
+sample that returns no row now fails as an assertion that says zero, rather than as a psql syntax
+error with an unset variable, which is what made the original red run hard to read. And the CI objects
+are run-scoped: the container names and the ports come from the run id rather than being fixed per
+major, so two concurrent jobs on one Docker host no longer share, remove or connect to each other's
+servers.
+
+The wait is still a wait and not a poll, so a runner slow enough to miss ten seconds can still fail. A
+lone PG 14 failure in these two files should be rerun before it is treated as a defect.
 
 ## Open questions
 
@@ -224,6 +228,11 @@ before treating it as a defect.
   or folded into the parent?
 - `n_dead_tup` is an estimate that resets on a stats reset and after crash recovery, on every
   version (PG 15 moved the statistics into shared memory but still discards them on recovery). How much of
-  the "40%" can rest on it when pgstattuple is absent?
-- Should the estimate path be visibly marked (`measured` vs `estimated`) in every row? Recommended
-  yes, so nobody acts on an estimate thinking it is a measurement.
+  the "40%" can rest on it when pgstattuple is absent? **Answered, and the answer is that it is never
+  presented as a measurement.** Every row says `dead_rows_source = 'estimated'`, a sample taken across
+  a reset writes a marker row rather than reading as a table that cleared, and the measured figure is
+  a separate opt-in function rather than a value in the same column. What the estimate cannot do is
+  size a reclaim, and that is what [docs/detect.md](docs/detect.md) settles.
+- ~~Should the estimate path be visibly marked (`measured` vs `estimated`) in every row?~~ **Done.**
+  `dead_rows_source` is a column on every row of `bloat_cause` and of `bloat_cause_history`, and it
+  says `estimated` on every row the extension writes.

@@ -6,7 +6,7 @@
 
 | | |
 |---|---|
-| PostgreSQL | **14 or later.** On 13 and earlier `CREATE EXTENSION` refuses, and says why. 14 reaches upstream end of life on 2026-11-12 and stays supported until PostgreSQL 19 is stable. Tested on 14 and 18. |
+| PostgreSQL | **14 or later.** On 13 and earlier `CREATE EXTENSION` refuses, and says why. 14 reaches upstream end of life on 2026-11-12 and stays supported until PostgreSQL 19 is stable. Tested on 14 to 19, where 19 is the current pre-release (`19beta4`). |
 | Preloaded libraries | None. Pure SQL, no restart. |
 | Privileges to install | A superuser, for `CREATE EXTENSION`. |
 | Optional | Nothing in 0.1. `pgstattuple` will be used by a later, explicit measuring function if it is installed; it is never required and never runs implicitly. |

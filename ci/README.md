@@ -1,7 +1,7 @@
 # ci
 
 `ci/job.sh <major>` is the whole test job, so a red run reproduces on any machine with Docker, psql and
-pg_prove by running the same command. `.github/workflows/ci.yml` runs it for PostgreSQL 14 and 18 on
+pg_prove by running the same command. `.github/workflows/ci.yml` runs it for PostgreSQL 14 to 19 on
 GitHub-hosted runners, plus a lint job that needs no database. The server image is `ci/Dockerfile`: the
 official `postgres` image, which ships `pgstattuple`, plus pgTAP.
 
