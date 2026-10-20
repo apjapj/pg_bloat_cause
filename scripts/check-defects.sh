@@ -34,6 +34,7 @@ fi
 
 ext=$(basename "$(ls ./*.control 2>/dev/null | head -1)" .control)
 [ -n "$ext" ] || { echo "check-defects.sh: no .control file, so no extension to test" >&2; exit 1; }
+default_version=$(sed -n "s/^default_version[[:space:]]*=[[:space:]]*'\([^']*\)'.*/\1/p" "$ext.control" | head -1)
 
 container=""; extdir=""
 if [ "$mode" = container ]; then
@@ -44,7 +45,18 @@ if [ "$mode" = container ]; then
         echo "check-defects.sh --container: the docker daemon is not answering${DOCKER_HOST:+ (DOCKER_HOST=$DOCKER_HOST)}" >&2
         exit 1
     fi
-    image="bc-ci:$v"; port=57$v; container="bc-defects-$v"
+    image="bc-ci:$v"
+    # Same run-scoping rule as ci/job.sh: a container job must not share a name or port with another
+    # job on the host. The +2 keeps this port out of the primary/standby pair's block.
+    if [ -n "${GITHUB_RUN_ID:-}" ]; then
+        suffix="-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT:-0}"
+        slot=$(( GITHUB_RUN_ID % 1000 ))
+        port=$(( 20000 + slot * 40 + (v - 14) * 2 + 2 ))
+    else
+        suffix=""
+        port=57$v
+    fi
+    container="bc-defects-$v$suffix"
     docker rm -f -v "$container" >/dev/null 2>&1
     docker build -q --build-arg PG_MAJOR="$v" -t "$image" ci/ >/dev/null || exit 1
     docker run -d --rm --name "$container" -p 127.0.0.1:$port:5432 -e POSTGRES_PASSWORD=test "$image" postgres >/dev/null || exit 1
@@ -86,6 +98,27 @@ for patch in defects/*.patch; do
     fi
     total=$((total+1))
 
+    # A patch that targets a full release script other than the current default version cannot be
+    # exercised by CREATE EXTENSION, which installs the default. That is a stale defect, not a
+    # missed one, and it must not look like a test weakness.
+    touched=$(grep -E '^\+\+\+ ' "$patch" | sed -E 's#^\+\+\+ (b/)?##')
+    stale=""
+    for f in $touched; do
+        case "$f" in
+            "$ext"--[0-9]*.sql)
+                v=${f#"$ext"--}; v=${v%.sql}
+                case "$v" in
+                    *--*) ;;
+                    *) [ "$v" = "$default_version" ] || stale="$f" ;;
+                esac
+                ;;
+        esac
+    done
+    if [ -n "$stale" ]; then
+        echo "  $id: COULD-NOT-RUN (patch targets $stale, current default is $default_version)"
+        norun=$((norun+1)); continue
+    fi
+
     # Control: the test must PASS on the pristine tree, or "caught" means nothing.
     drop_ext
     ctl=$(pg_prove --dbname postgres "$test" 2>&1); crc=$?
@@ -95,7 +128,6 @@ for patch in defects/*.patch; do
         norun=$((norun+1)); continue
     fi
 
-    touched=$(grep -E '^\+\+\+ ' "$patch" | sed -E 's#^\+\+\+ (b/)?##')
     tmp=$(mktemp -d)
     for f in $touched; do mkdir -p "$tmp/$(dirname "$f")" && cp "$f" "$tmp/$f"; done
     if ! patch -s -p1 -d "$tmp" < "$patch"; then

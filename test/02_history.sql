@@ -73,7 +73,7 @@ INSERT INTO bc_h_series SELECT g, 'new' FROM generate_series(1, 2000) g;
 ANALYZE bc_h_series;
 UPDATE bc_h_series SET v = 'paid' WHERE id % 2 = 0;
 \o
-SELECT pg_sleep(1.5);
+SELECT pg_sleep(10);
 SELECT pg_stat_clear_snapshot();
 
 -- ---------------------------------------------------------------- below the floor, then in the series
@@ -81,8 +81,8 @@ SELECT pg_stat_clear_snapshot();
 -- A byte floor above anything this table has: it is below the floor and not yet in the series, so no
 -- row is written and it is counted instead.
 \o /dev/null
-SELECT sum(sampled)::int AS sampled, sum(below_floor)::int AS below_floor,
-       sum(not_established)::int AS not_established
+SELECT coalesce(sum(sampled),0)::int AS sampled, coalesce(sum(below_floor),0)::int AS below_floor,
+       coalesce(sum(not_established),0)::int AS not_established
   FROM bloat_cause_sample(min_dead_pct => 0.1, min_dead_bytes => 1000000000,
                           sampled_at => current_setting('bc_h.t0')::timestamptz + interval '10 seconds')
 \gset
@@ -96,8 +96,8 @@ SELECT ok(:below_floor::int >= 1,
 
 -- Above the floor: at least one row, labelled estimated.
 \o /dev/null
-SELECT sum(sampled)::int AS sampled, sum(below_floor)::int AS below_floor,
-       sum(not_established)::int AS not_established
+SELECT coalesce(sum(sampled),0)::int AS sampled, coalesce(sum(below_floor),0)::int AS below_floor,
+       coalesce(sum(not_established),0)::int AS not_established
   FROM bloat_cause_sample(min_dead_pct => 0.1, min_dead_bytes => 0,
                           sampled_at => current_setting('bc_h.t0')::timestamptz + interval '20 seconds')
 \gset
@@ -116,8 +116,8 @@ SELECT is(:sampled::int >= 1, true,
 -- Already in the series: sampled even when now below a floor, so a series that starts does not
 -- silently stop.
 \o /dev/null
-SELECT sum(sampled)::int AS sampled, sum(below_floor)::int AS below_floor,
-       sum(not_established)::int AS not_established
+SELECT coalesce(sum(sampled),0)::int AS sampled, coalesce(sum(below_floor),0)::int AS below_floor,
+       coalesce(sum(not_established),0)::int AS not_established
   FROM bloat_cause_sample(min_dead_pct => 0.1, min_dead_bytes => 1000000000,
                           sampled_at => current_setting('bc_h.t0')::timestamptz + interval '30 seconds')
 \gset
@@ -157,13 +157,13 @@ GRANT EXECUTE ON FUNCTION bloat_cause_sample(numeric, bigint, timestamptz) TO bc
 GRANT EXECUTE ON FUNCTION bloat_cause_findings(interval, bigint) TO bc_h_runner;
 GRANT SELECT, INSERT ON bloat_cause_history TO bc_h_runner;
 \o
-SELECT pg_sleep(1.5);
+SELECT pg_sleep(10);
 SELECT pg_stat_clear_snapshot();
 
 \o /dev/null
 SET ROLE bc_h_runner;
-SELECT sum(sampled)::int AS sampled, sum(below_floor)::int AS below_floor,
-       sum(not_established)::int AS not_established
+SELECT coalesce(sum(sampled),0)::int AS sampled, coalesce(sum(below_floor),0)::int AS below_floor,
+       coalesce(sum(not_established),0)::int AS not_established
   FROM bloat_cause_sample(min_dead_pct => 0.1, min_dead_bytes => 0,
                           sampled_at => current_setting('bc_h.t0')::timestamptz + interval '40 seconds')
 \gset
@@ -197,12 +197,12 @@ ANALYZE bc_h_reset;
 UPDATE bc_h_reset SET v = 'paid' WHERE id % 2 = 0;
 DELETE FROM bloat_cause_history WHERE relname = 'bc_h_reset';
 \o
-SELECT pg_sleep(1.5);
+SELECT pg_sleep(10);
 SELECT pg_stat_clear_snapshot();
 
 \o /dev/null
-SELECT sum(sampled)::int AS sampled, sum(below_floor)::int AS below_floor,
-       sum(not_established)::int AS not_established
+SELECT coalesce(sum(sampled),0)::int AS sampled, coalesce(sum(below_floor),0)::int AS below_floor,
+       coalesce(sum(not_established),0)::int AS not_established
   FROM bloat_cause_sample(min_dead_pct => 0.1, min_dead_bytes => 0,
                           sampled_at => current_setting('bc_h.t0')::timestamptz - interval '1 minute')
 \gset
@@ -212,11 +212,11 @@ SELECT sum(sampled)::int AS sampled, sum(below_floor)::int AS below_floor,
 -- is explicit, so the wait changes nothing about what the row is dated.
 SELECT pg_stat_reset();
 \o
-SELECT pg_sleep(1);
+SELECT pg_sleep(10);
 SELECT pg_stat_clear_snapshot();
 \o /dev/null
-SELECT sum(sampled)::int AS sampled, sum(below_floor)::int AS below_floor,
-       sum(not_established)::int AS not_established
+SELECT coalesce(sum(sampled),0)::int AS sampled, coalesce(sum(below_floor),0)::int AS below_floor,
+       coalesce(sum(not_established),0)::int AS not_established
   FROM bloat_cause_sample(min_dead_pct => 0.1, min_dead_bytes => 0,
                           sampled_at => current_setting('bc_h.t0')::timestamptz + interval '50 seconds')
 \gset
@@ -246,12 +246,12 @@ SELECT is((SELECT count(*)::int FROM bloat_cause_history
 \o /dev/null
 UPDATE bc_h_reset SET v = 'paid' WHERE id <= 10;
 \o
-SELECT pg_sleep(1.5);
+SELECT pg_sleep(10);
 SELECT pg_stat_clear_snapshot();
 
 \o /dev/null
-SELECT sum(sampled)::int AS sampled, sum(below_floor)::int AS below_floor,
-       sum(not_established)::int AS not_established
+SELECT coalesce(sum(sampled),0)::int AS sampled, coalesce(sum(below_floor),0)::int AS below_floor,
+       coalesce(sum(not_established),0)::int AS not_established
   FROM bloat_cause_sample(min_dead_pct => 0.1, min_dead_bytes => 0,
                           sampled_at => current_setting('bc_h.t0')::timestamptz + interval '60 seconds')
 \gset
@@ -276,12 +276,12 @@ ANALYZE bc_h_old;
 UPDATE bc_h_old SET v = 'paid' WHERE id % 2 = 0;
 DELETE FROM bloat_cause_history WHERE relname = 'bc_h_old';
 \o
-SELECT pg_sleep(1.5);
+SELECT pg_sleep(10);
 SELECT pg_stat_clear_snapshot();
 
 \o /dev/null
-SELECT sum(sampled)::int AS sampled, sum(below_floor)::int AS below_floor,
-       sum(not_established)::int AS not_established
+SELECT coalesce(sum(sampled),0)::int AS sampled, coalesce(sum(below_floor),0)::int AS below_floor,
+       coalesce(sum(not_established),0)::int AS not_established
   FROM bloat_cause_sample(min_dead_pct => 0.1, min_dead_bytes => 0,
                           sampled_at => current_setting('bc_h.t0')::timestamptz - interval '40 days')
 \gset
