@@ -39,9 +39,21 @@ jobs:
         # Every stable version in the supported range, not a sample of it. 14 and 18 were the whole
         # matrix until this, which meant 15, 16 and 17 were never run anywhere, while the README said
         # the "PG 14 to 19 matrix" was done. All three pass on this harness when run by hand; they now
-        # run on every push. 19 is NOT here: its image needs the include form and a separate apt major,
-        # the way pg_lock_tree does it, and that is a separate change rather than a silent omission.
-        pg: ["14", "15", "16", "17", "18"]
+        # run on every push. 19 is the current pre-release: its image needs the include form and a
+        # separate apt major, the way pg_lock_tree does it. At GA, the tag becomes stable 19.
+        include:
+          - pg_version: "14"
+            apt_version: "14"
+          - pg_version: "15"
+            apt_version: "15"
+          - pg_version: "16"
+            apt_version: "16"
+          - pg_version: "17"
+            apt_version: "17"
+          - pg_version: "18"
+            apt_version: "18"
+          - pg_version: "19beta4"
+            apt_version: "19"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: psql and pg_prove on the runner
@@ -51,7 +63,7 @@ jobs:
       - name: build the pair, install, pgTAP, scenarios, evidence
         # Strict: a difference in the masked evidence fails the job, like pgTAP and the scenario
         # assertions. See ci/README.md for why it started report-only and what the first run showed.
-        run: ./ci/job.sh ${{ matrix.pg }}
+        run: ./ci/job.sh ${{ matrix.pg_version }} ${{ matrix.apt_version }}
 
   # One command, the same in both copies: check-defects.sh picks container mode here (Docker is on
   # this runner) and local mode on the Forgejo copy (its runner is a PostgreSQL and has no Docker).

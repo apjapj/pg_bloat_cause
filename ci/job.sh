@@ -20,7 +20,8 @@
 # reasons on day one teaches everyone to ignore red. Tighten it to 1 once those runs have been read:
 # see ci/README.md. pgTAP and the scenario assertions are fatal in both modes.
 set -uo pipefail
-v=${1:?usage: ci/job.sh <postgres major version>}
+v=${1:?usage: ci/job.sh <postgres major version> [apt major]}
+apt=${2:-${v%%beta*}}; apt=${apt%%rc*}; major=$apt
 cd "$(dirname "$0")/.."
 
 # Preflight. This job needs two things from Docker before it can do anything: the CLI on PATH and a
@@ -46,12 +47,12 @@ image="bc-ci:$v"
 if [ -n "${GITHUB_RUN_ID:-}" ]; then
     suffix="-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT:-0}"
     slot=$(( GITHUB_RUN_ID % 1000 ))
-    pport=$(( 20000 + slot * 40 + (v - 14) * 2 ))
+    pport=$(( 20000 + slot * 40 + (major - 14) * 2 ))
     sport=$(( pport + 1 ))
 else
     suffix=""
-    pport=57$v
-    sport=$((57${v} + 1))
+    pport=57$major
+    sport=$((57${major} + 1))
 fi
 export BC_NAME_SUFFIX="$suffix"
 
@@ -59,7 +60,7 @@ fail=0
 step() { printf '\n== %s\n' "$1"; }
 
 step "build $image"
-docker build -q --build-arg PG_MAJOR="$v" -t "$image" ci/ >/dev/null || exit 1
+docker build -q --build-arg PG_MAJOR="$v" --build-arg APT_MAJOR="$apt" -t "$image" ci/ >/dev/null || exit 1
 
 step "primary on $pport, standby on $sport"
 scenarios/standby.sh "$v" down
@@ -87,11 +88,11 @@ printf '%s\n' "$out"
 if grep -qE 'FAILED' <<<"$out"; then fail=1; fi
 
 step "evidence matches what is committed"
-if git diff --quiet -- "scenarios/evidence/*.pg$v.txt"; then
+if git diff --quiet -- "scenarios/evidence/*.pg$major.txt"; then
     echo "  identical"
 else
-    git diff --stat -- "scenarios/evidence/*.pg$v.txt"
-    git diff -- "scenarios/evidence/*.pg$v.txt"
+    git diff --stat -- "scenarios/evidence/*.pg$major.txt"
+    git diff -- "scenarios/evidence/*.pg$major.txt"
     if [ "${BC_EVIDENCE_STRICT:-1}" = 0 ]; then
         echo "EVIDENCE DIFFERS (report-only): the diff above is not failing this job, because BC_EVIDENCE_STRICT=0"
     else
