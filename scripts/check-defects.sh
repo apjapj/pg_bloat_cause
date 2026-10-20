@@ -44,7 +44,18 @@ if [ "$mode" = container ]; then
         echo "check-defects.sh --container: the docker daemon is not answering${DOCKER_HOST:+ (DOCKER_HOST=$DOCKER_HOST)}" >&2
         exit 1
     fi
-    image="bc-ci:$v"; port=57$v; container="bc-defects-$v"
+    image="bc-ci:$v"
+    # Same run-scoping rule as ci/job.sh: a container job must not share a name or port with another
+    # job on the host. The +2 keeps this port out of the primary/standby pair's block.
+    if [ -n "${GITHUB_RUN_ID:-}" ]; then
+        suffix="-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT:-0}"
+        slot=$(( GITHUB_RUN_ID % 1000 ))
+        port=$(( 20000 + slot * 40 + (v - 14) * 2 + 2 ))
+    else
+        suffix=""
+        port=57$v
+    fi
+    container="bc-defects-$v$suffix"
     docker rm -f -v "$container" >/dev/null 2>&1
     docker build -q --build-arg PG_MAJOR="$v" -t "$image" ci/ >/dev/null || exit 1
     docker run -d --rm --name "$container" -p 127.0.0.1:$port:5432 -e POSTGRES_PASSWORD=test "$image" postgres >/dev/null || exit 1

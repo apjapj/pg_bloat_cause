@@ -38,7 +38,23 @@ if ! docker info >/dev/null 2>&1; then
     exit 1
 fi
 
-image="bc-ci:$v"; pport=57$v; sport=$((57${v} + 1))
+image="bc-ci:$v"
+
+# Run-scoped Docker objects and ports. Two jobs on one Docker host must not share, remove or connect
+# to each other's servers. Locally there is no GITHUB_RUN_ID, so the historical names and ports stay
+# as documented; CI gets a suffix and a port block derived from the run.
+if [ -n "${GITHUB_RUN_ID:-}" ]; then
+    suffix="-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT:-0}"
+    slot=$(( GITHUB_RUN_ID % 1000 ))
+    pport=$(( 20000 + slot * 40 + (v - 14) * 2 ))
+    sport=$(( pport + 1 ))
+else
+    suffix=""
+    pport=57$v
+    sport=$((57${v} + 1))
+fi
+export BC_NAME_SUFFIX="$suffix"
+
 fail=0
 step() { printf '\n== %s\n' "$1"; }
 
@@ -51,7 +67,7 @@ BC_IMAGE="$image" scenarios/standby.sh "$v" "$pport" "$sport" || exit 1
 trap 'scenarios/standby.sh "$v" down' EXIT
 
 step "install the extension"
-scenarios/install-extension.sh "bc-pri-$v" "bc-sby-$v" || exit 1
+scenarios/install-extension.sh "bc-pri-$v$suffix" "bc-sby-$v$suffix" || exit 1
 
 export PGHOST=127.0.0.1 PGPORT=$pport PGUSER=postgres PGPASSWORD=test PGDATABASE=postgres
 
@@ -66,7 +82,7 @@ step "pgTAP"
 pg_prove --dbname postgres test/*.sql || fail=1
 
 step "scenarios"
-out=$(BC_CONTAINER="bc-pri-$v" BC_STANDBY_PORT=$sport scenarios/run.sh)
+out=$(BC_CONTAINER="bc-pri-$v$suffix" BC_STANDBY_PORT=$sport scenarios/run.sh)
 printf '%s\n' "$out"
 if grep -qE 'FAILED' <<<"$out"; then fail=1; fi
 
@@ -90,13 +106,13 @@ step "scenarios with pgstattuple never installed"
 # reports itself as not established, and every assertion must still hold. This is the with-and-without
 # branch made real. The evidence differs from the committed set by design (the measured lines are
 # gone), so this run writes it to a scratch directory and nothing here is compared to a committed file.
-for c in "bc-pri-$v" "bc-sby-$v"; do
+for c in "bc-pri-$v$suffix" "bc-sby-$v$suffix"; do
     docker exec -u root "$c" sh -c 'rm -f "$(pg_config --sharedir)"/extension/pgstattuple* "$(pg_config --pkglibdir)"/pgstattuple.so' 2>/dev/null || true
 done
 absent=$(psql -X -At -c "SELECT count(*) FROM pg_available_extensions WHERE name = 'pgstattuple'")
 echo "  pgstattuple available: ${absent} (0 is the state this leg claims to test)"
 [ "$absent" = "0" ] || { echo "  FAIL  pgstattuple is still available, so this leg proves nothing"; fail=1; }
-out2=$(BC_CONTAINER="bc-pri-$v" BC_STANDBY_PORT=$sport EVIDENCE_DIR=$(mktemp -d) scenarios/run.sh)
+out2=$(BC_CONTAINER="bc-pri-$v$suffix" BC_STANDBY_PORT=$sport EVIDENCE_DIR=$(mktemp -d) scenarios/run.sh)
 printf '%s\n' "$out2"
 if grep -qE 'FAILED' <<<"$out2"; then fail=1; fi
 

@@ -51,7 +51,7 @@ UPDATE bc_det SET v = 'paid' WHERE id % 2 = 0;
 TRUNCATE bloat_cause_alert;
 DELETE FROM bloat_cause_history WHERE relname LIKE 'bc_det%';
 \o
-SELECT pg_sleep(1.5);
+SELECT pg_sleep(5);
 SELECT pg_stat_clear_snapshot();
 
 -- The rungs. b is the current dead_bytes, so b is rung 1, b/10 rung 2 and b/100 rung 3.
@@ -172,7 +172,7 @@ INSERT INTO bc_det_gone SELECT g, 'new' FROM generate_series(1, 3000) g;
 ANALYZE bc_det_gone;
 UPDATE bc_det_gone SET v = 'paid' WHERE id % 2 = 0;
 \o
-SELECT pg_sleep(1.5);
+SELECT pg_sleep(5);
 SELECT pg_stat_clear_snapshot();
 
 \o /dev/null
@@ -184,7 +184,7 @@ RESET search_path;
 -- below the floor" case: no longer watched, so no cleared event and the state is kept.
 SELECT pg_stat_reset_single_table_counters('bc_det_gone'::regclass);
 \o
-SELECT pg_sleep(1.5);
+SELECT pg_sleep(5);
 SELECT pg_stat_clear_snapshot();
 
 SELECT is(:gone_onset::int, 1, 'the second fixture is an onset too');
@@ -216,7 +216,7 @@ INSERT INTO bc_det_unk SELECT g, 'new' FROM generate_series(1, 3000) g;
 ANALYZE bc_det_unk;
 UPDATE bc_det_unk SET v = 'paid' WHERE id % 2 = 0;
 \o
-SELECT pg_sleep(1.5);
+SELECT pg_sleep(5);
 SELECT pg_stat_clear_snapshot();
 
 \o /dev/null
@@ -235,7 +235,7 @@ SELECT statement_timestamp(), 'public', 'bc_det_unk', dead_rows, dead_pct, dead_
 SELECT pg_stat_reset();
 UPDATE bc_det_unk SET v = 'refund' WHERE id <= 10;
 \o
-SELECT pg_sleep(1.5);
+SELECT pg_sleep(5);
 SELECT pg_stat_clear_snapshot();
 
 \o /dev/null
@@ -284,7 +284,7 @@ INSERT INTO bc_det_over SELECT g, 'new' FROM generate_series(1, 3000) g;
 ANALYZE bc_det_over;
 UPDATE bc_det_over SET v = 'paid' WHERE id % 2 = 0;
 \o
-SELECT pg_sleep(1.5);
+SELECT pg_sleep(5);
 SELECT pg_stat_clear_snapshot();
 
 -- The reset moves the statistics reset time and zeroes every counter; the new dead rows put the
@@ -293,7 +293,7 @@ SELECT pg_stat_clear_snapshot();
 SELECT pg_stat_reset();
 UPDATE bc_det_over SET v = 'due' WHERE id % 3 = 0;
 \o
-SELECT pg_sleep(1.5);
+SELECT pg_sleep(5);
 SELECT pg_stat_clear_snapshot();
 
 \o /dev/null
@@ -326,7 +326,7 @@ ANALYZE bc_det_persist;
 UPDATE bc_det_persist SET v = 'paid' WHERE id % 2 = 0;
 DELETE FROM bloat_cause_history WHERE relname = 'bc_det_persist';
 \o
-SELECT pg_sleep(1.5);
+SELECT pg_sleep(5);
 SELECT pg_stat_clear_snapshot();
 
 \o /dev/null
@@ -337,7 +337,7 @@ SELECT pg_stat_clear_snapshot();
 -- side of it.
 SELECT set_config('bc_d.t0', statement_timestamp()::text, false);
 -- The pre-reset sample.
-SELECT sum(sampled)::int AS sampled FROM bloat_cause_sample(
+SELECT coalesce(sum(sampled),0)::int AS sampled FROM bloat_cause_sample(
          min_dead_pct => 0.1, min_dead_bytes => 0,
          sampled_at => current_setting('bc_d.t0')::timestamptz - interval '1 second') \gset
 -- The reset, then the first post-reset sample: the marker. The wait is for the reset time to
@@ -347,20 +347,20 @@ SELECT sum(sampled)::int AS sampled FROM bloat_cause_sample(
 -- nothing about what the row is dated.
 SELECT pg_stat_reset();
 \o
-SELECT pg_sleep(1);
+SELECT pg_sleep(5);
 SELECT pg_stat_clear_snapshot();
 \o /dev/null
-SELECT sum(not_established)::int AS nes FROM bloat_cause_sample(
+SELECT coalesce(sum(not_established),0)::int AS nes FROM bloat_cause_sample(
          min_dead_pct => 0.1, min_dead_bytes => 0,
          sampled_at => current_setting('bc_d.t0')::timestamptz + interval '1 second') \gset
 -- New dead rows, then the second post-reset sample, which must be ordinary.
 UPDATE bc_det_persist SET v = 'late' WHERE id % 3 = 0;
 \o
-SELECT pg_sleep(1.5);
+SELECT pg_sleep(5);
 SELECT pg_stat_clear_snapshot();
 
 \o /dev/null
-SELECT sum(sampled)::int AS sampled2 FROM bloat_cause_sample(
+SELECT coalesce(sum(sampled),0)::int AS sampled2 FROM bloat_cause_sample(
          min_dead_pct => 0.1, min_dead_bytes => 0,
          sampled_at => current_setting('bc_d.t0')::timestamptz + interval '2 seconds') \gset
 \o

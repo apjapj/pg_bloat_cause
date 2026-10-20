@@ -49,7 +49,7 @@ UPDATE bc_test_orders SET status = 'paid' WHERE id % 2 = 0;
 \o
 -- Statistics reach the view at transaction end, flushed at most once a second on 15 and later and by
 -- the collector on 14; a short wait and a fresh snapshot make them visible here.
-SELECT pg_sleep(1.5);
+SELECT pg_sleep(5);
 SELECT pg_stat_clear_snapshot();
 
 SELECT is((SELECT cause FROM bloat_cause_findings(interval '1 minute') WHERE relname = 'bc_test_orders'),
@@ -166,7 +166,7 @@ END
 $wait$;
 VACUUM bc_test_orders;
 \o
-SELECT pg_sleep(1.5);
+SELECT pg_sleep(5);
 SELECT pg_stat_clear_snapshot();
 -- Conditional, and counted either way: if another session or a prepared transaction holds the horizon,
 -- the VACUUM above cannot remove the dead rows, the table correctly still appears, and asserting

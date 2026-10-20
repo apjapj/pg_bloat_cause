@@ -2,8 +2,8 @@
 # scenarios/standby.sh <major> <primary-port> <standby-port>: build a primary and a hot standby from
 # the pg_lock_tree matrix image, for s3. Docker only; no database needed beforehand.
 #
-#   primary  bc-pri-<major>  wal_level=logical and the other scenario settings, as the README states
-#   standby  bc-sby-<major>  pg_basebackup -R from the primary through its own physical slot
+#   primary  bc-pri-<major>[-run]  wal_level=logical and the other scenario settings, as the README states
+#   standby  bc-sby-<major>[-run]  pg_basebackup -R from the primary through its own physical slot
 #                            standby_s3, then hot_standby_feedback = on
 #
 # The standby's entrypoint is replaced rather than configured afterwards, for the reason the README
@@ -12,12 +12,14 @@
 #
 # Run scenarios/standby.sh <major> down to remove both.
 set -euo pipefail
-v=$1; net=bc-repl-$v; pri=bc-pri-$v; sby=bc-sby-$v
+v=$1; suffix=${BC_NAME_SUFFIX:-}
+net=bc-repl-$v$suffix; pri=bc-pri-$v$suffix; sby=bc-sby-$v$suffix
 if [ "${2:-}" = down ]; then docker rm -f -v "$pri" "$sby" >/dev/null 2>&1; docker network rm "$net" >/dev/null 2>&1; exit 0; fi
 pport=$2; sport=$3
 # The image defaults to the local pg-dev-infra one; CI passes BC_IMAGE, built from ci/Dockerfile.
 image=${BC_IMAGE:-pg-dev-infra-pg$v}
-# Start fresh, by exact name. A run killed before its EXIT trap leaves bc-pri-$v and bc-sby-$v Up,
+# Start fresh, by exact name. A run killed before its EXIT trap leaves bc-pri-$v$suffix and
+# bc-sby-$v$suffix Up,
 # because --rm removes a container only when it stops; the next run then fails with "container name
 # ... is already in use" or talks to the stale server, which is how a stale database once answered a
 # no-pgstattuple check. Remove exactly these two own containers first, never a broad selector.
