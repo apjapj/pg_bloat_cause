@@ -6,7 +6,7 @@
 **What's slowing down.** Bloat is a symptom; this tool names the cause.
 
 Part of [pg_incident_watch](https://github.com/apjapj/pg_incident_watch). Pure SQL, `CREATE EXTENSION pg_bloat_cause`, no
-restart, no `shared_preload_libraries`. Status: **0.4.1**, built and tested on
+restart, no `shared_preload_libraries`. Status: **0.5.0**, built and tested on
 PostgreSQL 14 and 18. Install and grants: [INSTALL.md](INSTALL.md). What changed in each
 release: [CHANGELOG.md](CHANGELOG.md). Changing it or releasing it:
 [CONTRIBUTING.md](CONTRIBUTING.md).
@@ -172,7 +172,10 @@ prepared transaction, no row at all for a standby holder. See [docs/ranking.md](
 pg_lock_tree's lessons from its own docs: compare escalation against the last notification rather
 than the last sample, keep samples as separate statements, and never store query text that would
 have to be redacted on every sample. The contract is settled in
-[docs/detect.md](docs/detect.md), written before the SQL the way `docs/measure.md` was.
+[docs/detect.md](docs/detect.md), written before the SQL the way `docs/measure.md` was. 0.5.0 adds
+the opt-in that does store it, `bloat_cause.holder_query`, with its redaction and truncation in
+[docs/holder-query.md](docs/holder-query.md); the column is NULL in 0.4.x and until a session turns
+the setting on.
 
 ### 7. Docs, grants and the matrix
 
