@@ -86,7 +86,7 @@ fi
 # instead of reading the file that was just swapped, so the mutant would never load.
 drop_ext() { psql -qX -c "DROP EXTENSION IF EXISTS \"$ext\" CASCADE" >/dev/null 2>&1; }
 
-total=0; caught=0; missed=0; norun=0; regressed=""
+total=0; caught=0; missed=0; norun=0; hard_fail=0; regressed=""
 for patch in defects/*.patch; do
     [ -e "$patch" ] || continue
     id=$(basename "$patch" .patch)
@@ -106,17 +106,17 @@ for patch in defects/*.patch; do
     for f in $touched; do
         case "$f" in
             "$ext"--[0-9]*.sql)
-                v=${f#"$ext"--}; v=${v%.sql}
-                case "$v" in
+                pv=${f#"$ext"--}; pv=${pv%.sql}
+                case "$pv" in
                     *--*) ;;
-                    *) [ "$v" = "$default_version" ] || stale="$f" ;;
+                    *) [ "$pv" = "$default_version" ] || stale="$f" ;;
                 esac
                 ;;
         esac
     done
     if [ -n "$stale" ]; then
         echo "  $id: COULD-NOT-RUN (patch targets $stale, current default is $default_version)"
-        norun=$((norun+1)); continue
+        norun=$((norun+1)); hard_fail=$((hard_fail+1)); continue
     fi
 
     # Control: the test must PASS on the pristine tree, or "caught" means nothing.
@@ -132,7 +132,7 @@ for patch in defects/*.patch; do
     for f in $touched; do mkdir -p "$tmp/$(dirname "$f")" && cp "$f" "$tmp/$f"; done
     if ! patch -s -p1 -d "$tmp" < "$patch"; then
         echo "  $id: COULD-NOT-RUN (the patch does not apply)"
-        norun=$((norun+1)); rm -rf "$tmp"; continue
+        norun=$((norun+1)); hard_fail=$((hard_fail+1)); rm -rf "$tmp"; continue
     fi
     for f in $touched; do put "$tmp/$(basename "$f")" "$(basename "$f")"; done
     rm -rf "$tmp"
@@ -157,5 +157,5 @@ done
 den=$((caught+missed))
 echo
 echo "defects ($mode): $caught of $den caught, $missed missed, $norun could-not-run"
-[ "$missed" -eq 0 ] || { echo "regression:$regressed" >&2; exit 1; }
+[ "$missed" -eq 0 ] && [ "$hard_fail" -eq 0 ] || { echo "regression:$regressed" >&2; exit 1; }
 exit 0
