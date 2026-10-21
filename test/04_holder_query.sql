@@ -221,6 +221,10 @@ SELECT ok(has_function_privilege('bc_hq_runner',
 SELECT ok(has_table_privilege('bc_hq_runner', 'bloat_cause_history', 'INSERT'),
           'an explicit INSERT grant on the history survives the update');
 
+-- Leave the shared test database at the default version. The update-path block above deliberately
+-- ended at 0.5.0; a later file in the suite needs the default (0.6.0) and must not depend on order.
+ALTER EXTENSION pg_bloat_cause UPDATE;
+
 SELECT * FROM finish();
 
 \o /dev/null

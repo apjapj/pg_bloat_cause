@@ -10,6 +10,9 @@ SET client_min_messages = warning;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 CREATE EXTENSION IF NOT EXISTS pg_bloat_cause;
+-- test/04_holder_query ends its update-path block at 0.5.0. The suite shares one database, so bring
+-- the extension back to the default before calling a function added in 0.6.0.
+ALTER EXTENSION pg_bloat_cause UPDATE;
 
 DROP TABLE IF EXISTS bc_ctx_orders;
 CREATE TABLE bc_ctx_orders (id int PRIMARY KEY, status text)
