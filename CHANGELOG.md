@@ -17,6 +17,11 @@ This release also corrects `min_dead_pct`'s default from **0.1 to 10**. The para
 in 0..100, so the old default meant one tenth of one percent and contradicted the documented 10
 percent; the tests always passed 0.1 explicitly, so nothing caught it.
 
+**Behaviour change:** the default threshold is now **10 percent**; it was **0.1 percent**. A caller
+that omits `min_dead_pct` will receive fewer alerts from `bloat_cause_notify()` and sample fewer
+tables from `bloat_cause_sample()` after the upgrade. Pass the old value explicitly if that was the
+intent.
+
 Additive apart from the default correction: a new helper and its comment, and the findings body. No
 return type or grant changes. Update path from 0.6.0.
 
