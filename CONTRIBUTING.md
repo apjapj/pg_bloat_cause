@@ -9,7 +9,7 @@ applies to a repository with 16 scenarios, 165 tests and fifteen release and upd
 | Target | What it does | Needs |
 |---|---|---|
 | `make install` | Installs the control file and every script in `DATA` via PGXS. | A superuser shell and the server headers (`postgresql-server-dev-NN`). |
-| `make prove` | `pg_prove --dbname $(TESTDB) test/*.sql`. Default `TESTDB` is `postgres`; override it with `make prove TESTDB=...`. | An installed extension and a running server. The libpq variables in your environment pick the server. |
+| `make prove` | `scripts/run-tests.sh $(TESTDB)`, which runs `pg_prove --dbname $(TESTDB) test/*.sql` between a clean-horizon precondition and a teardown of the `bc_test_*` sessions it opened. Default `TESTDB` is `postgres`; override it with `make prove TESTDB=...`. | An installed extension and a running server. The libpq variables in your environment pick the server. |
 | `make lint` | Three scripts, no database: `scripts/lint-docs.sh`, `scenarios/check-evidence.sh`, `scripts/check-workflows.sh`. | Nothing. Safe anywhere, cheap enough for a pre-commit hook. |
 | `make defects` | Re-injects every defect in `defects/` and requires the test that caught it to fail again; `PG=18` picks the server image. | Docker, `pg_prove` and `patch`. Not part of `make lint`. |
 
@@ -36,6 +36,12 @@ breaks one will go red rather than pass quietly.
   `shared_preload_libraries`, no restart.
 
 ## Tests
+
+Run the suite through `make prove` (or `scripts/run-tests.sh`), not bare `pg_prove`: the wrapper
+refuses to start when another client session or prepared transaction holds the cluster-wide horizon,
+naming the pid and database, and terminates only `bc_test_*` sessions when it finishes. A stray
+`idle in transaction` session otherwise looks like a bug in the extension, because
+`bloat_cause_holder()` sees it as the oldest holder for every fixture.
 
 `test/01_bloat_cause.sql` is `plan(56)`, `test/02_history.sql` is `plan(28)`, `test/03_detect.sql`
 is `plan(47)`, `test/05_context.sql` is `plan(13)` and `test/04_holder_query.sql` is `plan(21)`. The

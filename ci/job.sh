@@ -80,7 +80,7 @@ step "the measurement with no pgstattuple ever installed"
 ci/check-no-pgstattuple.sh || fail=1
 
 step "pgTAP"
-pg_prove --dbname postgres test/*.sql || fail=1
+./scripts/run-tests.sh postgres || fail=1
 
 step "scenarios"
 out=$(BC_CONTAINER="bc-pri-$v$suffix" BC_STANDBY_PORT=$sport scenarios/run.sh)
