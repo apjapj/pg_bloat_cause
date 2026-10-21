@@ -12,6 +12,12 @@ TESTDB ?= postgres
 PG ?= 18
 prove:
 	pg_prove --dbname $(TESTDB) test/*.sql
+
+# The read-side overhead benchmark: one call to bloat_cause_text() and bloat_cause_findings(), beside
+# a hand-written pg_stat_user_tables query, median of N calls over a stated fixture. It creates and
+# drops its own tables and needs superuser, so it passes --force itself.
+bench-overhead:
+	./scripts/bench-overhead.sh --force $(if $(TABLES),--tables=$(TABLES),) $(if $(N),--repeat=$(N),) $(if $(KEEP),--keep,)
 defects:
 	# Re-inject every recorded defect (defects/) and require the test that caught it to fail
 	# again; a defect the suite no longer catches is a regression and exits non-zero.
@@ -23,4 +29,4 @@ lint:
 	# and scripts/lint.sh needs no PostgreSQL toolchain. Both CI copies call the script directly.
 	./scripts/lint.sh
 
-.PHONY: install prove defects lint
+.PHONY: install prove defects lint bench-overhead
