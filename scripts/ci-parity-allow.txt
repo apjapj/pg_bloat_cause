@@ -1,3 +1,4 @@
 # jobs this repository runs in only one CI copy, documented platform differences
 # (the scenario job is always allowed, whatever it is called)
 test
+pgxn

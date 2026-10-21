@@ -18,6 +18,13 @@ prove:
 # drops its own tables and needs superuser, so it passes --force itself.
 bench-overhead:
 	./scripts/bench-overhead.sh --force $(if $(TABLES),--tables=$(TABLES),) $(if $(N),--repeat=$(N),) $(if $(KEEP),--keep,)
+
+# Generate PGXN metadata from the .control file and the tag; the package needs an explicit tag.
+pgxn-check:
+	./scripts/pgxn-meta.py --check
+
+pgxn-package:
+	./scripts/pgxn-meta.py --tag "$(TAG)" --package "$(OUT)"
 defects:
 	# Re-inject every recorded defect (defects/) and require the test that caught it to fail
 	# again; a defect the suite no longer catches is a regression and exits non-zero.
@@ -29,4 +36,4 @@ lint:
 	# and scripts/lint.sh needs no PostgreSQL toolchain. Both CI copies call the script directly.
 	./scripts/lint.sh
 
-.PHONY: install prove defects lint bench-overhead
+.PHONY: install prove defects lint bench-overhead pgxn-check pgxn-package

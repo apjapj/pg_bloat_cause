@@ -20,6 +20,37 @@ permissions:
   contents: read
 
 jobs:
+  # Build the PGXN package and validate META.json with PGXN's own validator. On a tag it uses that
+  # tag; on a PR it uses the latest existing tag, so a broken generator or pgxn.toml fails on the PR.
+  pgxn:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Build the package and validate META.json
+        run: |
+          set -euo pipefail
+          mkdir -p build/pgxn
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            tag="$GITHUB_REF_NAME"
+          else
+            version=$(sed -n "s/^default_version[[:space:]]*=[[:space:]]*'\([^']*\)'.*/\1/p" *.control)
+            tag="v${version}"
+          fi
+          if git rev-parse --verify --quiet "${tag}^{commit}" >/dev/null; then
+            version="${tag#v}"
+            echo "building from tag $tag"
+            ./scripts/pgxn-meta.py --tag "$tag" --output build/pgxn/META.json
+            ./scripts/pgxn-meta.py --tag "$tag" --package "build/pgxn/pg_bloat_cause-${version}.zip"
+          else
+            echo "no tag $tag yet: validating unreleased metadata only"
+            ./scripts/pgxn-meta.py --check --unreleased --output build/pgxn/META.json
+          fi
+          docker run --rm -v "$PWD/build/pgxn:/work" -w /work \
+            pgxn/pgxn-tools@sha256:53e79ef1c8b9a0ee88b51e89b36fd30c46c9f2326aec0cde1d7f66e47ad719ff \
+            validate_pgxn_meta META.json
+
   lint:
     runs-on: ubuntu-latest
     steps:

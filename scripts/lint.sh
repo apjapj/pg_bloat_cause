@@ -42,6 +42,11 @@ step "the stated PostgreSQL range"
 # from pg-dev-infra; run with bash, it has no shebang.
 step "the two CI copies agree"
 bash ./scripts/check-ci-parity.sh
+# The PGXN metadata is generated from the control file and the stable fields, and it must not name a
+# private host or address: META.json is published and permanent.
+step "the PGXN metadata"
+./scripts/pgxn-meta.py --check >/dev/null
+
 # Every vendored harness copy still matches the sha256 in its own header. The canonical is private,
 # so this is the in-repo half of the sync. Vendored from pg-dev-infra; run with bash.
 step "the vendored harness matches its headers"
