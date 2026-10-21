@@ -4,8 +4,9 @@
 
 | Version | Supported | Why |
 |---|---|---|
-| 0.5.0 | **yes** | the current release, tagged `v0.5.0` |
-| 0.4.1, 0.4.0, 0.3.1, 0.3, 0.2, 0.1 | yes, by updating | `ALTER EXTENSION pg_bloat_cause UPDATE TO '0.5.0'`; 0.5.0 replaces `bloat_cause_sample()` only, so any earlier version reaches it |
+| 0.6.0 | **yes** | the current release; adds `bloat_cause_context()`, a read-only function from the statistics and catalogs |
+| 0.5.0 | yes, by updating | adds the `holder_query` opt-in; the 0.6.0 path adds one function and changes no existing object |
+| 0.4.1, 0.4.0, 0.3.1, 0.3, 0.2, 0.1 | yes, by updating | `ALTER EXTENSION pg_bloat_cause UPDATE` reaches 0.6.0 through 0.5.0 |
 
 Fixes are made on `main` and released as a new version. Released tags are not edited.
 

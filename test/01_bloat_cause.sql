@@ -48,8 +48,17 @@ ANALYZE bc_test_orders;
 UPDATE bc_test_orders SET status = 'paid' WHERE id % 2 = 0;
 \o
 -- Statistics reach the view at transaction end, flushed at most once a second on 15 and later and by
--- the collector on 14; a short wait and a fresh snapshot make them visible here.
-SELECT pg_sleep(10);
+-- the collector on 14. Poll for the count instead of assuming a fixed wait is long enough; a busy or
+-- slow collector is not a reason for a false failure, and a quiet one should not cost ten seconds.
+DO $wait$
+BEGIN
+  FOR i IN 1..100 LOOP
+    EXIT WHEN (SELECT n_dead_tup FROM pg_stat_user_tables
+                WHERE relname = 'bc_test_orders') > 0;
+    PERFORM pg_sleep(0.1);
+  END LOOP;
+END
+$wait$;
 SELECT pg_stat_clear_snapshot();
 
 SELECT is((SELECT cause FROM bloat_cause_findings(interval '1 minute') WHERE relname = 'bc_test_orders'),
@@ -166,7 +175,18 @@ END
 $wait$;
 VACUUM bc_test_orders;
 \o
-SELECT pg_sleep(10);
+-- Poll for the cleaned count. With no other holder this exits as soon as the statistics catch up;
+-- with one, it waits the same bounded ten seconds the old fixed sleep did, then the conditional
+-- skip below explains why the table is still present.
+DO $wait$
+BEGIN
+  FOR i IN 1..100 LOOP
+    EXIT WHEN (SELECT n_dead_tup FROM pg_stat_user_tables
+                WHERE relname = 'bc_test_orders') = 0;
+    PERFORM pg_sleep(0.1);
+  END LOOP;
+END
+$wait$;
 SELECT pg_stat_clear_snapshot();
 -- Conditional, and counted either way: if another session or a prepared transaction holds the horizon,
 -- the VACUUM above cannot remove the dead rows, the table correctly still appears, and asserting
