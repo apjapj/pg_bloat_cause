@@ -221,11 +221,14 @@ lone PG 14 failure in these two files should be rerun before it is treated as a 
 
 ## Open questions
 
-- Index bloat is not in the overview. B-tree bloat has different causes (deletion patterns, no
-  deduplication on older indexes) and a different fix (`REINDEX CONCURRENTLY`). In scope later, or a
-  separate concern?
-- TOAST tables bloat independently and are vacuumed with their parent. Report them as their own rows,
-  or folded into the parent?
+- **Index bloat: decided, out of scope.** B-tree bloat has different causes, a different fix
+  (`REINDEX CONCURRENTLY`), a different measurement and different permissions. If pursued it is a
+  separate tool, not a later release of this one; the reasoning is in
+  [docs/index-and-toast.md](docs/index-and-toast.md).
+- **TOAST: decided, folded into the parent.** It is the parent's storage, vacuumed with it and
+  subject to the same horizon/autovacuum/lock causes. It will appear as a secondary measured line on
+  the parent, never as a row for `pg_toast.pg_toast_<oid>`, and never as the primary cause. The
+  fixture and threshold are in [docs/index-and-toast.md](docs/index-and-toast.md).
 - `n_dead_tup` is an estimate that resets on a stats reset and after crash recovery, on every
   version (PG 15 moved the statistics into shared memory but still discards them on recovery). How much of
   the "40%" can rest on it when pgstattuple is absent? **Answered, and the answer is that it is never
