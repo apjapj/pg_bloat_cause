@@ -82,6 +82,16 @@ ci/check-no-pgstattuple.sh || fail=1
 step "pgTAP"
 ./scripts/run-tests.sh postgres || fail=1
 
+# The TOAST estimate experiment on the middle majors. It creates about 200 MB of fixtures and
+# compares the statistics estimate with pgstattuple_approx; 14 and 18 are covered by the committed
+# evidence and the experiment's own runs, and 15-17 are where a statistics change is easiest to miss.
+case "$v" in
+    15|16|17)
+        step "TOAST estimate"
+        ./scripts/toast-estimate.sh || fail=1
+        ;;
+esac
+
 step "scenarios"
 out=$(BC_CONTAINER="bc-pri-$v$suffix" BC_STANDBY_PORT=$sport scenarios/run.sh)
 printf '%s\n' "$out"

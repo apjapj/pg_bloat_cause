@@ -1,5 +1,5 @@
 # pg_bloat_cause extension
 comment = 'What is slowing down: why dead rows are not being cleaned up, per table, ranked'
-default_version = '0.6.0'
+default_version = '0.7.0'
 relocatable = false
 trusted = false
