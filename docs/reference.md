@@ -20,6 +20,7 @@ exception, and they write only this extension's own tables (`bloat_cause_history
 | `bloat_cause_findings(age, gap)` | You want the columns the view hides, or arguments other than the defaults. The view is this with defaults. |
 | `bloat_cause_holder(age, gap)` | You want the horizon holders themselves, structured, without any table's finding attached. |
 | `bloat_cause_command(age, gap)` | You want the statement that clears the primary cause. Returned as text, never run. |
+| `bloat_cause_context(schema, table)` | You want one table's autovacuum context: last run, counts, dead rows, reloptions and resolved thresholds. |
 
 ## `bloat_cause` (view)
 
@@ -126,6 +127,38 @@ Only `autovacuum behind` acts, and it acts with `VACUUM`.
 
 The caller's own session is never returned, so an operator cannot be handed the means to
 disconnect themselves mid-query.
+
+## `bloat_cause_context(schema name, table name)`
+
+The autovacuum context for one table, from `pg_stat_user_tables` and `pg_class`. It is the answer to
+the question the finding leaves open: has autovacuum even tried? It reads statistics and catalogs
+only, so it never needs `pgstattuple` and never reads the table.
+
+One row per table. It raises `42P01` when the schema and table name do not match an ordinary table,
+materialized view or partitioned table, so a typo is not an empty result.
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `schemaname`, `relname`, `relid` | `name`, `name`, `oid` | The relation. |
+| `relkind` | `"char"` | `r` ordinary table, `m` materialized view, `p` partitioned table. |
+| `n_live_tup`, `n_dead_tup` | `bigint` | The statistics' live and dead row estimates. |
+| `n_mod_since_analyze`, `n_ins_since_vacuum` | `bigint` | Rows changed since the last analyze, and inserted since the last vacuum. |
+| `n_tup_ins`, `n_tup_upd`, `n_tup_del` | `bigint` | Cumulative tuple counts since the statistics were reset. |
+| `n_tup_hot_upd`, `n_tup_newpage_upd` | `bigint` | HOT updates, and updates that could not stay on the page. The second is NULL before PostgreSQL 16. |
+| `last_vacuum`, `last_autovacuum`, `last_clean` | `timestamptz` | Last manual vacuum, last automatic vacuum, and the later of the two. |
+| `last_analyze`, `last_autoanalyze` | `timestamptz` | Last manual and automatic analyze. |
+| `vacuum_count`, `autovacuum_count` | `bigint` | Cumulative manual and automatic vacuum counts. |
+| `analyze_count`, `autoanalyze_count` | `bigint` | Cumulative manual and automatic analyze counts. |
+| `reltuples`, `relpages` | `real`, `integer` | The planner's row and page estimates. |
+| `heap_bytes` | `bigint` | `pg_relation_size(relid)`: the heap only, not TOAST or indexes. |
+| `autovacuum_enabled` | `boolean` | The table reloption resolved against the cluster's `autovacuum` setting. |
+| `vacuum_threshold`, `vacuum_scale_factor` | `bigint`, `float8` | The vacuum trigger values, per-table reloption or cluster default. |
+| `vacuum_insert_threshold`, `vacuum_insert_scale_factor` | `bigint`, `float8` | The insert-based vacuum trigger values. |
+| `analyze_threshold`, `analyze_scale_factor` | `bigint`, `float8` | The analyze trigger values. |
+
+Counts are cumulative since the last `pg_stat_reset()` or crash recovery, like the statistics they
+come from. The function is closed like the other readers; a role sees the table only when its own
+privileges allow it.
 
 ## `bloat_cause_age(interval)`
 

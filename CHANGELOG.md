@@ -3,6 +3,18 @@
 Versions are listed newest first. Released tags are never edited: a change that needs
 a new entry gets a new version.
 
+## 0.6.0 (2026-10-21)
+
+`bloat_cause_context(schema, table)` reports the autovacuum context for one table: live and dead
+row estimates, insert/update/HOT counts, the last manual and automatic vacuum and analyze times and
+counts, heap size, whether autovacuum is enabled, and the resolved vacuum, insert and analyze
+thresholds and scale factors. It answers the question after the finding: has autovacuum even tried?
+
+Additive: one `CREATE FUNCTION` and its `COMMENT`, with an update path from 0.5.0. It reads
+`pg_stat_user_tables` and `pg_class` only; `pgstattuple` is not needed. `n_tup_newpage_upd` is NULL
+on PostgreSQL 14 and 15, where the statistic does not exist. No existing row type, signature or grant
+changes.
+
 ## 0.5.0 (2026-10-20)
 
 The `holder_query` opt-in, from [docs/holder-query.md](docs/holder-query.md). A new release script,
