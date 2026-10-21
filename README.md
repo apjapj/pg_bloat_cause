@@ -121,8 +121,8 @@ horizon holder exists but is not the reason a table's rows stay.
 What follows is the proposal it started from. The overview promises "ranks why dead rows aren't being cleaned up". Write down the rule before the
 code. Proposed: a horizon holder outranks everything, because nothing else is fixable while it is
 there; then a lock wait; then autovacuum off or behind; then HOT efficiency, which is a tuning
-finding rather than an incident. Within a cause, rank by dead bytes, not dead-row share, so a small
-table at 90% does not outrank a large one at 40%.
+finding rather than an incident. Within a cause, rank by estimated dead heap bytes, not dead-row
+share, so a small table at 90% does not outrank a large one at 40%.
 
 ### 4. ~~The first version: diagnose only~~ **Done: 0.1, tagged `v0.1.0`, [INSTALL.md](INSTALL.md)**
 

@@ -142,10 +142,10 @@ nothing runnable here: the statement that fixes it has to be run on another serv
 
 ## Within one cause: dead bytes, not share
 
-Two tables with the same primary cause are ordered by **dead bytes**, the space the dead rows take
-(`dead_tuple_len` when measured, `n_dead_tup` times the average row width when estimated). Not by
-dead-row share: a 10 MB table at 90% dead is a smaller problem than a 400 GB table at 40%, and share
-would put it first.
+Two tables with the same primary cause are ordered by **dead bytes**, meaning estimated dead **heap**
+bytes (`dead_tuple_len` when measured, `n_dead_tup` times the average heap row width when estimated).
+TOAST and index bytes are not included. It is not ranked by dead-row share: a 10 MB table at 90% dead
+is a smaller problem than a 400 GB table at 40%, and share would put it first.
 
 A horizon holder affects every table with dead rows, so it is reported **once**, with the tables it
 holds back listed under it in dead-bytes order, rather than as one identical top line per table.
