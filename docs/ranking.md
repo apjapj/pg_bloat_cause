@@ -165,7 +165,7 @@ page and an update to an unindexed column on a full page are identical in every 
 later the finding can only give a lower bound for the indexed-column share. On 14 and 15 it says it
 cannot separate the two at all.
 
-## Open: when the horizon holder is present but not binding
+## Tested: when the horizon holder is present but not binding
 
 The rule above treats a horizon holder as upstream whenever it exists. That is wrong in one case: a
 session that opened *after* a table's dead rows were made does not hold those rows back. s5's table
@@ -207,3 +207,11 @@ after; both tables have never been vacuumed.
   [100,000](../scenarios/evidence/s10_never_vacuumed_holder_before.pg18.txt) dead but not yet removable: the session binds. In s11 it removed all
   [100,000](../scenarios/evidence/s11_never_vacuumed_holder_after.pg18.txt): opened after the updates committed, the session's snapshot already sees them as
   dead, so it binds nothing.
+
+**The vacuumed case is now a fixture too.** s16 gives the table a prior vacuum, then makes new dead
+rows, then opens the holder after them. The vacuum finished before the holder, so it cannot say
+whether the holder binds the newer rows: the finding keeps the next cause as primary and puts the
+holder under unknowns as "not established", saying "this table has not been vacuumed since it
+began". VACUUM (VERBOSE) then removes all 100,000 dead rows, proving the holder did not bind. The
+scenario passes on PostgreSQL 14 to 19; evidence is committed under
+[scenarios/evidence](../scenarios/evidence/).

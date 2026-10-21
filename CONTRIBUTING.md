@@ -2,7 +2,7 @@
 
 Short version of what CI runs and what it will not catch for you. `pg_lock_tree`'s
 CONTRIBUTING.md is the long version and is worth reading once; this file is what
-applies to a repository with 15 scenarios, 152 tests and thirteen release and update scripts.
+applies to a repository with 16 scenarios, 152 tests and thirteen release and update scripts.
 
 ## Make targets
 

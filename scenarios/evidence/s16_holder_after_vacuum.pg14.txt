@@ -1,0 +1,34 @@
+
+part 1: a vacuum exists, but before the holder
+
+the usual hand-written query (pg_stat_user_tables)
+ relname | n_live_tup | n_dead_tup | dead_pct | last_autovacuum | last_vacuum
+ s16_orders | 100000 | 100000 | 50.0 | | <TIMESTAMP>
+(1 row)
+
+
+measured (pgstattuple)
+ s16_orders: 100000 live rows, 100000 dead rows, 47.07% of the table is dead tuples
+ last vacuum: <TIMESTAMP>
+ holder started: <TIMESTAMP>
+ finding: the holder is present, but the vacuum that finished before it cannot say whether it
+ binds these newer rows. The primary cause is the next one down; the holder is in unknowns.
+
+what pg_bloat_cause says about s16_orders
+ s16_orders: 100000 dead rows (50.0%, estimated), autovacuum is disabled on this table (100000 dead rows against a threshold of 20050). Then: 100000 of 100000 updates were not HOT; on this version an indexed-column update cannot be told from a full page. Not established: session <PID> (bloat_scen_s16, idle in transaction) is present, but whether it holds these rows back is not established: this table has not been vacuumed since it began. Run VACUUM (VERBOSE) on it; "dead but not yet removable" above zero means it does.
+ PASS s16_orders: cause autovacuum disabled, unknowns %bloat_scen_s16%not been vacuumed since it began%
+
+part 2: the finding's instruction, followed
+
+VACUUM (VERBOSE) s16_orders
+ INFO: table "s16_orders": found 100000 removable, 100000 nonremovable row versions in 3449 out of 3449 pages
+ DETAIL: 0 dead row versions cannot be removed yet, oldest xmin: <XID>
+
+what pg_bloat_cause says about s16_orders
+ (no finding: s16_orders does not appear)
+ PASS s16_orders: cause none
+
+expected cause
+ part 1 does NOT name the holder as the primary cause: the prior vacuum predates it, so binding
+ is not established and the holder is reported under unknowns. Part 2 shows it does not bind: VACUUM
+ removes every dead row. This is the vacuumed counterpart to s11's never-vacuumed table.
