@@ -33,7 +33,7 @@ rows and at least one cause, ordered by dead bytes descending.
 | `relid` | `oid` | Table oid, so a caller can join to `pg_class`. |
 | `dead_rows` | `bigint` | Dead rows, from the statistics. |
 | `dead_pct` | `numeric` | Dead rows as a percentage of live plus dead. |
-| `dead_bytes` | `bigint` | Reclaimable bytes, estimated from the statistics. |
+| `dead_bytes` | `bigint` | Estimated dead **heap** bytes: dead rows times the average heap row width, from the statistics. Excludes TOAST and index bytes, and is not a promise that VACUUM reclaims all of it. |
 | `dead_rows_source` | `text` | `estimated` or `measured`. Every row says which, so nobody acts on an estimate believing it is a measurement. |
 | `cause` | `text` | The primary cause, as [ranking.md](ranking.md) decides it. |
 | `cause_detail` | `text` | One sentence naming the cause, with the holder or the lock named in it. |
@@ -145,7 +145,7 @@ Registered with `pg_extension_config_dump`, so `pg_dump` carries it.
 | `relname` | `name` | Table name. |
 | `dead_rows` | `bigint` | Estimated dead rows. |
 | `dead_pct` | `numeric` | Estimated dead share. |
-| `dead_bytes` | `bigint` | Estimated reclaimable bytes. |
+| `dead_bytes` | `bigint` | Estimated dead **heap** bytes. Excludes TOAST and index bytes. |
 | `dead_rows_source` | `text` | Always `estimated` in 0.4.0: the view and the sampler report estimates, the reset marker included. `unknown` is not a value it takes. |
 | `stats_reset` | `boolean` | `true` only on the marker row a sample writes across a `pg_stat_reset()` or crash recovery; `false` on every ordinary row. The marker carries NULL figures and re-baselines the series. |
 | `holder_pid` | `int` | The horizon holder's pid when the cause was `horizon holder`, else NULL. |

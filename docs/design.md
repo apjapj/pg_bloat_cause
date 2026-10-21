@@ -7,8 +7,9 @@ The ranking itself, which cause comes first, is in [ranking.md](ranking.md).
 ## 1. Dead bytes are estimated, and every row says so
 
 `bloat_cause` orders tables by dead bytes, and computes them as `n_dead_tup` times the table's average
-row size on disk (heap size divided by live plus dead rows). Every row carries `dead_rows_source =
-'estimated'`.
+row size on disk (heap size divided by live plus dead rows). This is **heap-only**: `dead_bytes`
+excludes TOAST and index bytes, so it must not be read as total reclaimable disk. Every row carries
+`dead_rows_source = 'estimated'`.
 
 The label is mandatory because the estimate can be badly wrong. In s6 the statistics reported
 [199,996](../scenarios/evidence/s6_thresholds_too_high.pg18.txt) dead rows and `pgstattuple` measured
