@@ -105,7 +105,7 @@ while IFS= read -r line; do
         fi
         cmd=""
     else
-        cmd="$cmd$line"$'\n'
+        if [ -n "$cmd" ]; then cmd="$cmd"$'\n'"$line"; else cmd="$line"; fi
     fi
 done < <(val "SELECT command || E'\n__END_COMMAND__' FROM bloat_cause_command(interval '2 seconds', ${BC_STANDBY_XID_GAP:-1000}) WHERE command IS NOT NULL ORDER BY relname")
 note "  $n_run statement(s) executed"
