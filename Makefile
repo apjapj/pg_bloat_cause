@@ -11,7 +11,7 @@ include $(PGXS)
 TESTDB ?= postgres
 PG ?= 18
 prove:
-	pg_prove --dbname $(TESTDB) test/*.sql
+	./scripts/run-tests.sh $(TESTDB)
 
 # The read-side overhead benchmark: one call to bloat_cause_text() and bloat_cause_findings(), beside
 # a hand-written pg_stat_user_tables query, median of N calls over a stated fixture. It creates and

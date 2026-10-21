@@ -69,7 +69,8 @@ INSERT INTO bc_hq_t SELECT g, repeat('x', 100) FROM generate_series(1, 2000) g;
 -- The holder. BEGIN first, then the ALTER ROLE, so its xid is older than the DELETE below and it
 -- pins the dead rows. It stays idle in transaction, and the last statement it ran is the ALTER ROLE,
 -- which is the text the opt-in test expects to find (redacted).
-SELECT dblink_connect('hq', format('dbname=%s user=%s', current_database(), current_user));
+SELECT dblink_connect('hq', format('dbname=%s user=%s application_name=bc_test_holder_query',
+                                   current_database(), current_user));
 SELECT dblink_exec('hq', 'BEGIN');
 SELECT dblink_exec('hq', (SELECT val FROM bc_hq_fix WHERE name = 'alter_stmt'));
 
