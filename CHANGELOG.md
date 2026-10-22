@@ -1,5 +1,30 @@
 # changelog
 
+## 0.7.0 (2026-10-21)
+
+The TOAST line is now real, and it is estimated from the TOAST table's own statistics rather than
+read with `pgstattuple`. The experiment in `scripts/toast-estimate.sh` measured the estimate 7 to 9
+percent above `pgstattuple_approx()` in dead bytes and exact in dead percentage on PostgreSQL 14.24
+and 18.6, so the line says "estimated"; `pgstattuple` remains the opt-in exact read.
+
+The line appears in `then[]` on the parent only when the estimate is at least 10 percent dead and at
+least 100 MB, the same pair the heap notify rule uses. It never becomes a row of its own and never the
+primary cause. A TOAST relation's own `toast.autovacuum_enabled` setting is named separately, because
+the parent's setting does not cover it. When the TOAST statistics are absent, the line moves to
+`unknowns` and says "not established".
+
+This release also corrects `min_dead_pct`'s default from **0.1 to 10**. The parameter is a percentage
+in 0..100, so the old default meant one tenth of one percent and contradicted the documented 10
+percent; the tests always passed 0.1 explicitly, so nothing caught it.
+
+**Behaviour change:** the default threshold is now **10 percent**; it was **0.1 percent**. A caller
+that omits `min_dead_pct` will receive fewer alerts from `bloat_cause_notify()` and sample fewer
+tables from `bloat_cause_sample()` after the upgrade. Pass the old value explicitly if that was the
+intent.
+
+Additive apart from the default correction: a new helper and its comment, and the findings body. No
+return type or grant changes. Update path from 0.6.0.
+
 Versions are listed newest first. Released tags are never edited: a change that needs
 a new entry gets a new version.
 

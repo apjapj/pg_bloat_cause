@@ -92,17 +92,22 @@ fi
 # a pg_class column, and an adjacent-string-literal statement did not parse. Both looked fine to read.
 say "running every statement bloat_cause_command() returns"
 n_run=0
+cmd=""
+# Each command is emitted with a sentinel line after it, so a multi-line command is accumulated and
+# executed whole. The previous loop ran one line at a time, which made every multi-line read-back
+# fail as incomplete SQL.
 while IFS= read -r line; do
-    case "$line" in "| "*) c=${line#"| "} ;; *) continue ;; esac
-    [ -z "$c" ] && continue
-    n_run=$((n_run + 1))
-    if psql_q -c "$c" >/dev/null 2>&1; then note "PASS  ran: $c"
-    else note "FAIL  did not run: $c"; fi
-# One statement per LINE prefixed, because a command can be several lines long (the autovacuum
-# read-back is). Reading them with a plain `while read` takes only the first line of each, so the
-# multi-line ones were never executed at all and the count was wrong. This was found by PG14 failing
-# with a command this loop should have run and did not.
-done < <(val "SELECT command FROM bloat_cause_command(interval '2 seconds', ${BC_STANDBY_XID_GAP:-1000}) ORDER BY relname" | sed 's/^/| /')
+    if [ "$line" = "__END_COMMAND__" ]; then
+        if [ -n "$cmd" ]; then
+            n_run=$((n_run + 1))
+            if psql_q -c "$cmd" >/dev/null 2>&1; then note "PASS  ran: $cmd"
+            else note "FAIL  did not run: $cmd"; fi
+        fi
+        cmd=""
+    else
+        if [ -n "$cmd" ]; then cmd="$cmd"$'\n'"$line"; else cmd="$line"; fi
+    fi
+done < <(val "SELECT command || E'\n__END_COMMAND__' FROM bloat_cause_command(interval '2 seconds', ${BC_STANDBY_XID_GAP:-1000}) WHERE command IS NOT NULL ORDER BY relname")
 note "  $n_run statement(s) executed"
 
 expected "SELECT pg_cancel_backend(<the live pid>), with what it costs in the same row, and every

@@ -41,22 +41,49 @@ autovacuum and lock causes apply to it. A separate row would:
 - split one cause across two rows, so the parent could look clean while its TOAST is the problem;
 - pollute ranking with a relation the operator did not create.
 
-The intended shape, when it is implemented, is a **secondary line on the parent**: for example
-"TOAST: 1.2 GB, 41% dead, measured", and only when `pgstattuple` can read the TOAST relation. There
-is no cheap estimate for TOAST in `pg_stat_user_tables`, so without the extension the line is absent,
-not guessed. It never becomes the primary cause: the primary cause is still the horizon, autovacuum
-setting or lock that lets the parent and its TOAST accumulate dead rows.
+The shape is a **secondary line on the parent**: for example
+"TOAST: ~1.2 GB, 41% dead (estimated); VACUUM the parent cleans it too". It never becomes the primary
+cause: the primary cause is still the horizon, autovacuum setting or lock that lets the parent and its
+TOAST accumulate dead rows.
 
-### What must be built before the TOAST line
+### The estimate is real, and it is cheap
 
-1. A fixture with out-of-line values, dead TOAST rows, and a vacuum that clears them. The parent heap
-   and the TOAST heap must be measured separately, with the TOAST OID resolved from
-   `pg_class.reltoastrelid`.
-2. A test that the line appears only when `pgstattuple` is available, and says "not established"
-   rather than zero when it is not.
-3. A decision on the threshold: a TOAST line is useful only when it changes the action, so it should
-   appear when TOAST dead bytes are material relative to the parent's, not on every wide table.
-4. No change to the primary-cause ranking and no new command: `VACUUM` on the parent is the action for
-   both.
+The first draft of this note said there was no cheap estimate, because `pg_stat_user_tables` does not
+show TOAST rows. That was wrong: `pg_stat_all_tables` carries live and dead tuple counts for the TOAST
+relation, and `pg_class` gives its size. The experiment in
+[`scripts/toast-estimate.sh`](../scripts/toast-estimate.sh) measures the estimate against
+`pgstattuple_approx()` on PostgreSQL 14.24 and 18.6, with 20 KB out-of-line values, update-only,
+delete-only, partial-update and mixed-size fixtures:
 
-This is a later release, not a change to the current finding shape.
+| fixture | measured dead bytes | statistics estimate | error |
+| :-- | --: | --: | --: |
+| update all 200 rows | 4,079,200 | 4,370,432 | +7.1% |
+| delete 100 of 200 | 2,039,600 | 2,187,264 | +7.2% |
+| update 50 of 200 | 1,019,800 | 1,092,812 | +7.2% |
+| mixed 5 KB/30 KB, update half, delete third | 1,688,372 | 1,843,267 | +9.2% |
+
+The dead percentage was exact in every case; the byte estimate was 7 to 9 percent high. It is
+reported as **estimated**, never measured. `pgstattuple` remains the opt-in exact read.
+
+### Materiality
+
+The line appears when the **estimate itself** is at least **10 percent dead and at least 100 MB**.
+That is the same pair the heap notify rule uses, so TOAST and heap findings read consistently; it is
+not a setting. A boundary test should sit clear of 100 MB on both sides because the estimate runs
+about 9 percent high.
+
+### TOAST autovacuum is separate
+
+A TOAST relation has its own `toast.autovacuum_*` reloptions and its own statistics row. Setting
+`autovacuum_enabled = false` on the parent does not set the TOAST reloption; setting
+`toast.autovacuum_enabled = false` does. The line names that condition separately, because the
+existing "autovacuum is disabled" finding reads the parent's setting and would otherwise miss it.
+
+### Boundaries that stay
+
+1. No row of its own for `pg_toast.pg_toast_<oid>`.
+2. Never the primary cause and no new command: `VACUUM` on the parent is the action for both.
+3. `not established` when the TOAST statistics are absent or unreadable, never zero.
+4. No setting: the threshold is fixed.
+
+Implemented in 0.7.0. The family page is corrected separately.
