@@ -160,7 +160,7 @@ it, and a reader's eye catches it before anything else.
 
 ### Versions in prose
 
-CI runs every PostgreSQL version the matrix declares: 14, 15, 16, 17, 18 and 19beta4, all of
+CI runs every PostgreSQL version the matrix declares: 14, 15, 16, 17, 18 and 19rc1, all of
 them, with no hole. Two kinds of sentence name versions, and they are not the same claim:
 
 - A document that states **current coverage** names the matrix range, `14 to 19`.

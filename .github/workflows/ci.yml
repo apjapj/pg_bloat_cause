@@ -83,7 +83,7 @@ jobs:
             apt_version: "17"
           - pg_version: "18"
             apt_version: "18"
-          - pg_version: "19beta4"
+          - pg_version: "19rc1"
             apt_version: "19"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
