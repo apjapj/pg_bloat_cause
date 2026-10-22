@@ -14,7 +14,7 @@
 #   - pg_version: "14"                          lock_tree's include list
 #
 # and then, in every document, a phrase of the form "<n> to <m>" on a line that also says "matrix".
-# The two numbers must be the smallest and largest the matrix declares. "19beta4" counts as 19, because
+# The two numbers must be the smallest and largest the matrix declares. "19rc1" counts as 19, because
 # it is the 19 line even though the string is not a number.
 #
 # A document that says "the matrix" with no numbers makes no claim and is not checked. A range where the
@@ -32,7 +32,7 @@ ci=".github/workflows/ci.yml"
 [ -f "$ci" ] || ci=".github/workflows/test.yml"   # lock_tree names its workflow test.yml
 [ -f "$ci" ] || die "no CI workflow found to read the matrix from"
 
-# Every version the matrix declares, from both forms. Sorted numerically on the major, so 19beta4 sorts
+# Every version the matrix declares, from both forms. Sorted numerically on the major, so 19rc1 sorts
 # as 19 rather than after 18 by string.
 versions=$( { grep -oE '"1[0-9](beta[0-9]+)?"' "$ci" || true; } \
           | tr -d '"' | sed 's/beta.*//' | sort -n -u )

@@ -7,7 +7,7 @@
 
 Part of [pg_incident_watch](https://github.com/apjapj/pg_incident_watch). Pure SQL, `CREATE EXTENSION pg_bloat_cause`, no
 restart, no `shared_preload_libraries`. Status: **0.7.0**, built and tested on
-PostgreSQL 14 to 19, where 19 is the current pre-release (`19beta4`). Install and grants:
+PostgreSQL 14 to 19, where 19 is the current pre-release (`19rc1`). Install and grants:
 [INSTALL.md](INSTALL.md). What changed in each release: [CHANGELOG.md](CHANGELOG.md). Changing
 it or releasing it: [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -184,7 +184,7 @@ the setting on.
 shared PG matrix. Tests run with and without pgstattuple and pg_lock_tree.
 
 Done: [INSTALL.md](INSTALL.md), [docs/reference.md](docs/reference.md), and the PG matrix, which **runs
-14 to 19** on every push. 19 is the current pre-release (`19beta4`) and uses the `include` form and a
+14 to 19** on every push. 19 is the current pre-release (`19rc1`) and uses the `include` form and a
 separate apt major, as pg_lock_tree's workflow does.
 
 The with-and-without-`pgstattuple` matrix leg was the gap here, and step 6 closed it: `ci/job.sh`
