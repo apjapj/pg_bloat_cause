@@ -2,7 +2,7 @@
 
 Short version of what CI runs and what it will not catch for you. `pg_lock_tree`'s
 CONTRIBUTING.md is the long version and is worth reading once; this file is what
-applies to a repository with 16 scenarios, 171 tests and fifteen release and update scripts.
+applies to a repository with 16 scenarios, 182 tests and seventeen release and update scripts.
 
 ## Make targets
 
@@ -44,7 +44,8 @@ naming the pid and database, and terminates only `bc_test_*` sessions when it fi
 `bloat_cause_holder()` sees it as the oldest holder for every fixture.
 
 `test/01_bloat_cause.sql` is `plan(56)`, `test/02_history.sql` is `plan(28)`, `test/03_detect.sql`
-is `plan(47)`, `test/05_context.sql` is `plan(13)`, `test/07_partition.sql` is `plan(6)` and `test/04_holder_query.sql` is `plan(21)`. The
+is `plan(47)`, `test/05_context.sql` is `plan(13)`, `test/06_toast.sql` is `plan(11)`,
+`test/07_partition.sql` is `plan(6)` and `test/04_holder_query.sql` is `plan(21)`. The
 plans must match the number of assertions; the lint does not check that here, so if you add an
 assertion, count it.
 

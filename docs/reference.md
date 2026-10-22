@@ -21,6 +21,7 @@ exception, and they write only this extension's own tables (`bloat_cause_history
 | `bloat_cause_holder(age, gap)` | You want the horizon holders themselves, structured, without any table's finding attached. |
 | `bloat_cause_command(age, gap)` | You want the statement that clears the primary cause. Returned as text, never run. |
 | `bloat_cause_context(schema, table)` | You want one table's autovacuum context: last run, counts, dead rows, reloptions and resolved thresholds. |
+| `bloat_cause_toast(schema, table)` | You want the TOAST line for one parent, estimated from the TOAST statistics, with its own autovacuum setting. |
 
 ## `bloat_cause` (view)
 
@@ -168,6 +169,17 @@ Counts are cumulative since the last `pg_stat_reset()` or crash recovery, like t
 come from. The function is closed like the other readers; a role sees the table only when its own
 privileges allow it.
 
+## `bloat_cause_toast(schema name, table name, parent_dead_bytes bigint DEFAULT NULL)`
+
+The TOAST line for one parent, from `pg_stat_all_tables` and `pg_class`. It does not read the table
+and does not need `pgstattuple`. `status` is `none` (no TOAST relation), `empty` (TOAST exists with
+no rows), `estimated` (the normal case) or `not_established` (no statistics row). `material` means the
+estimate is at least 10 percent dead **and** at least 100 MB; `line` is the sentence findings appends
+to `then[]`, or NULL when it is not material and the TOAST autovacuum setting is normal.
+
+The TOAST relation has its own `toast.autovacuum_*` reloptions and its own statistics, so
+`autovacuum_enabled` and the last run are reported separately from the parent's.
+
 ## `bloat_cause_age(interval)`
 
 Formats an interval for the sentences: days when it is two days or more, hours when it is two
@@ -194,7 +206,7 @@ Registered with `pg_extension_config_dump`, so `pg_dump` carries it.
 | `holder_slot` | `text` | The replication slot when a slot was the holder, else NULL. |
 | `holder_query` | `text` | NULL unless the session set `bloat_cause.holder_query` on, the holder was a session (not a prepared transaction or a standby), and the cause was `horizon holder`. Then it is the holder's first statement, with the credential shapes in [holder-query.md](holder-query.md) redacted and the text marked `[truncated]` when it reaches the server's query-text limit. Best-effort: it can still contain secrets, so treat it as untrusted text. |
 
-## `bloat_cause_sample(min_dead_pct numeric DEFAULT 0.1, min_dead_bytes bigint DEFAULT 0, sampled_at timestamptz DEFAULT NULL)`
+## `bloat_cause_sample(min_dead_pct numeric DEFAULT 10, min_dead_bytes bigint DEFAULT 0, sampled_at timestamptz DEFAULT NULL)`
 
 Appends one sample of every table worth a row: at or above both floors, or already in the history,
 so a series that starts does not silently stop. Returns one row per cause with `sampled`,
@@ -209,7 +221,7 @@ fixtures.
 
 Deletes samples older than the given age and returns the count.
 
-## `bloat_cause_notify(channel text DEFAULT 'bloat_cause', min_dead_pct numeric DEFAULT 0.1, min_dead_bytes bigint DEFAULT 104857600, min_holder_age interval DEFAULT '1 minute')`
+## `bloat_cause_notify(channel text DEFAULT 'bloat_cause', min_dead_pct numeric DEFAULT 10, min_dead_bytes bigint DEFAULT 104857600, min_holder_age interval DEFAULT '1 minute')`
 
 Raises one `NOTIFY` on `channel` when a table is BOTH at least `min_dead_pct` dead AND at least
 `min_dead_bytes` of dead space, and again each time it crosses the next ten-times rung above
@@ -222,7 +234,7 @@ contract: `tool`, `subject` (the schema-qualified relation name), `sampled_at`, 
 never consults the history or the `stats_reset` marker, so a table over the threshold after a reset
 still alerts and a higher rung after a reset still escalates.
 
-## `bloat_cause_notify_resolved(channel text DEFAULT 'bloat_cause', min_dead_pct numeric DEFAULT 0.1, min_dead_bytes bigint DEFAULT 104857600, min_holder_age interval DEFAULT '1 minute')`
+## `bloat_cause_notify_resolved(channel text DEFAULT 'bloat_cause', min_dead_pct numeric DEFAULT 10, min_dead_bytes bigint DEFAULT 104857600, min_holder_age interval DEFAULT '1 minute')`
 
 Raises one `cleared` `NOTIFY` per subject that had alerted and is still watched (present in
 `bloat_cause_findings()`) but is now below the alert threshold, then forgets its state. A table that

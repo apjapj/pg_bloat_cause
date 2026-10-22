@@ -38,7 +38,7 @@ have to be redacted on every sample.
 ## What it will be
 
 ```
-bloat_cause_sample(min_dead_pct numeric DEFAULT 0.1,
+bloat_cause_sample(min_dead_pct numeric DEFAULT 10,
                    min_dead_bytes bigint DEFAULT 0,
                    sampled_at timestamptz DEFAULT NULL)
   RETURNS TABLE (kind text, sampled int, below_floor int, not_established int)
@@ -47,7 +47,7 @@ bloat_cause_prune(older_than interval DEFAULT interval '35 days')
   RETURNS bigint
 
 bloat_cause_notify(channel text DEFAULT 'bloat_cause',
-                   min_dead_pct numeric DEFAULT 0.1,
+                   min_dead_pct numeric DEFAULT 10,
                    min_dead_bytes bigint DEFAULT 104857600,   -- 100 MB, the first rung
                    min_holder_age interval DEFAULT interval '1 minute')
   RETURNS bigint
