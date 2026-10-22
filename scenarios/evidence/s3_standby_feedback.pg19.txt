@@ -13,14 +13,14 @@ VACUUM (VERBOSE) s3_orders
  removable cutoff: <XID>, which was <XIDAGE> XIDs old when operation ended
 
 evidence on the primary: where the standby's horizon shows
- walsender bc_standby_19beta4: streaming, backend_xmin NULL
+ walsender bc_standby_19rc1: streaming, backend_xmin NULL
  slot standby_s3: physical, active true, xmin set, xmin age <XIDAGE>
 
 evidence on the standby: the query holding it
  standby session bloat_scen_s3: idle in transaction, backend_xmin set
 
 what pg_bloat_cause says about s3_orders
- s3_orders: 100000 dead rows (50.0%, estimated), held back by standby bc_standby_19beta4 through slot standby_s3; the query holding it is on the standby, and the fix is there. Then: autovacuum is disabled on this table (100000 dead rows against a threshold of 20050); 100000 of 100000 updates were not HOT; how many of them because an indexed column changed cannot be told.
+ s3_orders: 100000 dead rows (50.0%, estimated), held back by standby bc_standby_19rc1 through slot standby_s3; the query holding it is on the standby, and the fix is there. Then: autovacuum is disabled on this table (100000 dead rows against a threshold of 20050); 100000 of 100000 updates were not HOT; how many of them because an indexed column changed cannot be told.
  PASS s3_orders: cause horizon holder
 
 part 2: end the query on the standby, wait for feedback, VACUUM again
@@ -31,7 +31,7 @@ VACUUM (VERBOSE) s3_orders
  removable cutoff: <XID>, which was <XIDAGE> XIDs old when operation ended
 
 expected cause
- held back by standby bc_standby_19beta4 through its physical slot,
+ held back by standby bc_standby_19rc1 through its physical slot,
  because of a query open ON THE STANDBY. The fix is on the standby: end that query, or turn
  hot_standby_feedback off and accept query cancellations there instead. Part 2 shows it: with the
  query ended and nothing else changed, the same VACUUM removes every dead row.

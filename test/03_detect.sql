@@ -352,7 +352,7 @@ SELECT pg_stat_reset();
 DO $wait$
 DECLARE i int;
 BEGIN
-  FOR i IN 1..100 LOOP
+  FOR i IN 1..300 LOOP
     EXIT WHEN pg_stat_get_db_stat_reset_time(
                 (SELECT oid FROM pg_database WHERE datname = current_database()))
               >= current_setting('bc_d.t0')::timestamptz;
@@ -375,7 +375,7 @@ UPDATE bc_det_persist SET v = 'late' WHERE id % 3 = 0;
 DO $wait$
 DECLARE i int;
 BEGIN
-  FOR i IN 1..100 LOOP
+  FOR i IN 1..300 LOOP
     EXIT WHEN (SELECT n_dead_tup FROM pg_stat_user_tables WHERE relname = 'bc_det_persist')
               > current_setting('bc_d.late_before')::bigint;
     PERFORM pg_sleep(0.1);

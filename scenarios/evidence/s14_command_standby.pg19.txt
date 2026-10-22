@@ -19,7 +19,7 @@ evidence on the standby: the query holding it
  standby session bloat_scen_s14: idle in transaction
 
 what pg_bloat_cause says about s14_orders
- s14_orders: 100000 dead rows (50.0%, estimated), held back by standby bc_standby_19beta4 through slot standby_s3; the query holding it is on the standby, and the fix is there. Then: autovacuum is disabled on this table (100000 dead rows against a threshold of 20050); 100000 of 100000 updates were not HOT; how many of them because an indexed column changed cannot be told.
+ s14_orders: 100000 dead rows (50.0%, estimated), held back by standby bc_standby_19rc1 through slot standby_s3; the query holding it is on the standby, and the fix is there. Then: autovacuum is disabled on this table (100000 dead rows against a threshold of 20050); 100000 of 100000 updates were not HOT; how many of them because an indexed column changed cannot be told.
  PASS s14_orders: cause horizon holder, then %autovacuum is disabled%
 
 and no statement is offered for it
