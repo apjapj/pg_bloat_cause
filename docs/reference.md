@@ -43,6 +43,14 @@ rows and at least one cause, ordered by dead bytes descending.
 | `then` | `text[]` | The secondary causes, in ranking order. |
 | `unknowns` | `text[]` | Causes present but not established, and always a note when the caller lacks `pg_read_all_stats`. |
 
+## Partitioned tables
+
+A partitioned parent has no storage and no dead tuples of its own, so it does not get a finding row.
+Each leaf partition is an ordinary table and is reported separately, with its own autovacuum
+settings and dead rows. `bloat_cause_context()` can describe the parent because it reads the catalog
+and statistics; `bloat_cause_measure()` refuses it because there is no heap to read. Test/07 pins
+this.
+
 ## `bloat_cause_findings(min_holder_age interval DEFAULT '1 minute', min_standby_xid_gap bigint DEFAULT 1000)`
 
 The columns above, with the arguments exposed.
