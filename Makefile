@@ -36,4 +36,7 @@ lint:
 	# and scripts/lint.sh needs no PostgreSQL toolchain. Both CI copies call the script directly.
 	./scripts/lint.sh
 
-.PHONY: install prove defects lint bench-overhead pgxn-check pgxn-package
+check-uninstall:
+	./scripts/check-uninstall.sh
+
+.PHONY: install prove defects lint bench-overhead pgxn-check pgxn-package check-uninstall

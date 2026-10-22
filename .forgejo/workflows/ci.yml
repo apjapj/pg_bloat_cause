@@ -111,6 +111,18 @@ jobs:
           echo "control says ${want}, server loaded ${got}"
           [ -n "$want" ] && [ "$got" = "$want" ] || {
             echo "the loaded version is not this checkout" >&2; exit 1; }
+      - name: Uninstall check with the internal snapshot kit
+        # The URL is a Forgejo repository variable, never committed. GitHub does not run this
+        # workflow, and a Forgejo instance without the variable skips the check rather than
+        # inventing a location.
+        if: ${{ vars.PROBEKIT_URL != '' }}
+        env:
+          PROBEKIT_URL: ${{ vars.PROBEKIT_URL }}
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch v0.1.0 "$PROBEKIT_URL" /tmp/probekit
+          make -C /tmp/probekit install
+          make check-uninstall
       - name: pgTAP
         run: ./scripts/run-tests.sh postgres
       - name: Scenarios
