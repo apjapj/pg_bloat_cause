@@ -16,8 +16,8 @@ v=$1; suffix=${BC_NAME_SUFFIX:-}
 net=bc-repl-$v$suffix; pri=bc-pri-$v$suffix; sby=bc-sby-$v$suffix
 if [ "${2:-}" = down ]; then docker rm -f -v "$pri" "$sby" >/dev/null 2>&1; docker network rm "$net" >/dev/null 2>&1; exit 0; fi
 pport=$2; sport=$3
-# The image defaults to the local pg-dev-infra one; CI passes BC_IMAGE, built from ci/Dockerfile.
-image=${BC_IMAGE:-pg-dev-infra-pg$v}
+# The image defaults to the local internal-tooling one; CI passes BC_IMAGE, built from ci/Dockerfile.
+image=${BC_IMAGE:-internal-tooling-pg$v}
 # Start fresh, by exact name. A run killed before its EXIT trap leaves bc-pri-$v$suffix and
 # bc-sby-$v$suffix Up,
 # because --rm removes a container only when it stops; the next run then fails with "container name
