@@ -17,6 +17,7 @@
 \set QUIET 1
 \o /dev/null
 SET client_min_messages = warning;
+\ir support/wait.sql
 CREATE EXTENSION IF NOT EXISTS pgtap;
 CREATE EXTENSION IF NOT EXISTS pg_bloat_cause;
 
@@ -51,8 +52,14 @@ UPDATE bc_det SET v = 'paid' WHERE id % 2 = 0;
 TRUNCATE bloat_cause_alert;
 DELETE FROM bloat_cause_history WHERE relname LIKE 'bc_det%';
 \o
-SELECT pg_sleep(10);
-SELECT pg_stat_clear_snapshot();
+-- The rungs below are read from the finding, so wait for the finding itself rather than for a dead
+-- count that a partial sample can satisfy.
+-- Flush boundary (see support/wait.sql): the backend reports its own counts when this command ends.
+SELECT pg_sleep(1.2);
+SELECT pg_temp.wait_until(
+  $cond$SELECT EXISTS (SELECT 1 FROM bloat_cause_findings()
+                        WHERE relname = 'bc_det' AND dead_bytes > 0)$cond$,
+  'bc_det to appear in the findings with dead bytes');
 
 -- The rungs. b is the current dead_bytes, so b is rung 1, b/10 rung 2 and b/100 rung 3.
 \o /dev/null
@@ -172,8 +179,12 @@ INSERT INTO bc_det_gone SELECT g, 'new' FROM generate_series(1, 3000) g;
 ANALYZE bc_det_gone;
 UPDATE bc_det_gone SET v = 'paid' WHERE id % 2 = 0;
 \o
-SELECT pg_sleep(10);
-SELECT pg_stat_clear_snapshot();
+-- Flush boundary (see support/wait.sql): the backend reports its own counts when this command ends.
+SELECT pg_sleep(1.2);
+SELECT pg_temp.wait_until(
+  $cond$SELECT EXISTS (SELECT 1 FROM bloat_cause_findings()
+                        WHERE relname = 'bc_det_gone' AND dead_bytes > 0)$cond$,
+  'bc_det_gone to appear in the findings with dead bytes');
 
 \o /dev/null
 SELECT dead_bytes AS g FROM bloat_cause_findings() WHERE relname = 'bc_det_gone' \gset
@@ -184,8 +195,14 @@ RESET search_path;
 -- below the floor" case: no longer watched, so no cleared event and the state is kept.
 SELECT pg_stat_reset_single_table_counters('bc_det_gone'::regclass);
 \o
-SELECT pg_sleep(10);
-SELECT pg_stat_clear_snapshot();
+-- The zeroed counters can lag. Wait until the table is actually gone from the findings, which is
+-- what the assertion below reads.
+-- Flush boundary (see support/wait.sql): the backend reports its own counts when this command ends.
+SELECT pg_sleep(1.2);
+SELECT pg_temp.wait_until(
+  $cond$SELECT NOT EXISTS (SELECT 1 FROM bloat_cause_findings()
+                            WHERE relname = 'bc_det_gone')$cond$,
+  'bc_det_gone to leave the findings after its counters are reset');
 
 SELECT is(:gone_onset::int, 1, 'the second fixture is an onset too');
 SELECT is((SELECT count(*)::int FROM bloat_cause_findings() WHERE relname = 'bc_det_gone'), 0,
@@ -216,18 +233,25 @@ INSERT INTO bc_det_unk SELECT g, 'new' FROM generate_series(1, 3000) g;
 ANALYZE bc_det_unk;
 UPDATE bc_det_unk SET v = 'paid' WHERE id % 2 = 0;
 \o
-SELECT pg_sleep(10);
-SELECT pg_stat_clear_snapshot();
+-- Flush boundary (see support/wait.sql): the backend reports its own counts when this command ends.
+SELECT pg_sleep(1.2);
+SELECT pg_temp.wait_until(
+  $cond$SELECT EXISTS (SELECT 1 FROM bloat_cause_findings()
+                        WHERE relname = 'bc_det_unk' AND dead_bytes > 0)$cond$,
+  'bc_det_unk to appear in the findings with dead bytes');
 
 \o /dev/null
 SELECT dead_bytes AS u FROM bloat_cause_findings() WHERE relname = 'bc_det_unk' \gset
 SET search_path = bc_det_shadow, public, pg_catalog;
 SELECT bloat_cause_notify(min_dead_bytes => :u) AS unk_onset \gset
 RESET search_path;
--- The last sample before the reset, recorded as the sampler would record it: 'estimated'.
+-- The last sample before the reset, recorded as the sampler would record it: 'estimated'. The
+-- instant is pinned so the reset time can be compared with it exactly.
+SELECT set_config('bc_d.u0', statement_timestamp()::text, false);
 INSERT INTO bloat_cause_history
        (sampled_at, schemaname, relname, dead_rows, dead_pct, dead_bytes, dead_rows_source)
-SELECT statement_timestamp(), 'public', 'bc_det_unk', dead_rows, dead_pct, dead_bytes, 'estimated'
+SELECT current_setting('bc_d.u0')::timestamptz, 'public', 'bc_det_unk',
+       dead_rows, dead_pct, dead_bytes, 'estimated'
   FROM bloat_cause_findings() WHERE relname = 'bc_det_unk';
 -- The reset moves the database statistics reset time past that sample. A few new dead rows then put
 -- the table back in the findings, below the alert threshold, which is the state that would clear if
@@ -235,8 +259,17 @@ SELECT statement_timestamp(), 'public', 'bc_det_unk', dead_rows, dead_pct, dead_
 SELECT pg_stat_reset();
 UPDATE bc_det_unk SET v = 'refund' WHERE id <= 10;
 \o
-SELECT pg_sleep(10);
-SELECT pg_stat_clear_snapshot();
+-- Both facts the guard reads must be visible: the propagated reset time (later than the sample) and
+-- the table back in the findings.
+-- Flush boundary (see support/wait.sql): the backend reports its own counts when this command ends.
+SELECT pg_sleep(1.2);
+SELECT pg_temp.wait_until(
+  $cond$SELECT pg_stat_get_db_stat_reset_time(
+            (SELECT oid FROM pg_database WHERE datname = current_database()))
+          > current_setting('bc_d.u0')::timestamptz
+         AND EXISTS (SELECT 1 FROM bloat_cause_findings()
+                      WHERE relname = 'bc_det_unk' AND dead_rows > 0)$cond$,
+  'the reset time and bc_det_unk finding to be visible');
 
 \o /dev/null
 SET search_path = bc_det_shadow, public, pg_catalog;
@@ -284,17 +317,29 @@ INSERT INTO bc_det_over SELECT g, 'new' FROM generate_series(1, 3000) g;
 ANALYZE bc_det_over;
 UPDATE bc_det_over SET v = 'paid' WHERE id % 2 = 0;
 \o
-SELECT pg_sleep(10);
-SELECT pg_stat_clear_snapshot();
+-- Flush boundary (see support/wait.sql): the backend reports its own counts when this command ends.
+SELECT pg_sleep(1.2);
+SELECT pg_temp.wait_until(
+  $cond$SELECT EXISTS (SELECT 1 FROM bloat_cause_findings()
+                        WHERE relname = 'bc_det_over' AND dead_bytes > 0)$cond$,
+  'bc_det_over to appear in the findings with dead bytes');
 
 -- The reset moves the statistics reset time and zeroes every counter; the new dead rows put the
 -- table back in the findings above the threshold.
 \o /dev/null
+SELECT set_config('bc_d.over0', statement_timestamp()::text, false);
 SELECT pg_stat_reset();
 UPDATE bc_det_over SET v = 'due' WHERE id % 3 = 0;
 \o
-SELECT pg_sleep(10);
-SELECT pg_stat_clear_snapshot();
+-- Flush boundary (see support/wait.sql): the backend reports its own counts when this command ends.
+SELECT pg_sleep(1.2);
+SELECT pg_temp.wait_until(
+  $cond$SELECT pg_stat_get_db_stat_reset_time(
+            (SELECT oid FROM pg_database WHERE datname = current_database()))
+          >= current_setting('bc_d.over0')::timestamptz
+         AND EXISTS (SELECT 1 FROM bloat_cause_findings()
+                      WHERE relname = 'bc_det_over' AND dead_bytes > 0)$cond$,
+  'the reset time and bc_det_over finding to be visible');
 
 \o /dev/null
 SELECT dead_bytes AS ob FROM bloat_cause_findings() WHERE relname = 'bc_det_over' \gset
@@ -326,15 +371,17 @@ ANALYZE bc_det_persist;
 UPDATE bc_det_persist SET v = 'paid' WHERE id % 2 = 0;
 DELETE FROM bloat_cause_history WHERE relname = 'bc_det_persist';
 \o
-SELECT pg_sleep(10);
-SELECT pg_stat_clear_snapshot();
+-- Flush boundary (see support/wait.sql): the backend reports its own counts when this command ends.
+SELECT pg_sleep(1.2);
+SELECT pg_temp.wait_until(
+  $cond$SELECT EXISTS (SELECT 1 FROM bloat_cause_findings()
+                        WHERE relname = 'bc_det_persist' AND dead_bytes > 0)$cond$,
+  'bc_det_persist to appear in the findings with dead bytes');
 
 \o /dev/null
--- t0 is the moment this block starts. The pre-reset sample is backdated a second before it and the
--- post-reset samples are a second and two seconds after it, so the samples straddle the reset time
--- without depending on its resolution: on older servers the statistics reset time can be coarser than
--- statement_timestamp(), and a sample dated in the same second as the reset could fall on the wrong
--- side of it.
+-- t0 is the instant before the pre-reset sample. Read the reset time once it has propagated and date
+-- the post-reset samples from that, not from t0: a reset can land after t0 + 1 second under load, and
+-- a sample dated from t0 would then be another marker instead of the ordinary row asserted below.
 SELECT set_config('bc_d.t0', statement_timestamp()::text, false);
 -- The pre-reset sample.
 SELECT coalesce(sum(sampled),0)::int AS sampled FROM bloat_cause_sample(
@@ -343,28 +390,25 @@ SELECT coalesce(sum(sampled),0)::int AS sampled FROM bloat_cause_sample(
 -- The reset, then the first post-reset sample: the marker. The wait is for the reset time to
 -- propagate: on a server with a separate statistics collector (14 and 15) pg_stat_reset() updates
 -- pg_stat_get_db_stat_reset_time() asynchronously, and a sample taken in the same instant would still
--- read the old time and miss the reset. The sample's own sampled_at is explicit, so the wait changes
--- nothing about what the row is dated.
+-- read the old time and miss the reset.
 SELECT pg_stat_reset();
 \o
--- The reset time is updated asynchronously by the statistics collector on 14 and 15. Poll for it
--- rather than assuming a fixed sleep is long enough; a slow collector is not a false failure.
-DO $wait$
-DECLARE i int;
-BEGIN
-  FOR i IN 1..300 LOOP
-    EXIT WHEN pg_stat_get_db_stat_reset_time(
-                (SELECT oid FROM pg_database WHERE datname = current_database()))
-              >= current_setting('bc_d.t0')::timestamptz;
-    PERFORM pg_sleep(0.1);
-  END LOOP;
-END
-$wait$;
+-- Flush boundary (see support/wait.sql): the backend reports its own counts when this command ends.
+SELECT pg_sleep(1.2);
+SELECT pg_temp.wait_until(
+  $cond$SELECT pg_stat_get_db_stat_reset_time(
+            (SELECT oid FROM pg_database WHERE datname = current_database()))
+          >= current_setting('bc_d.t0')::timestamptz$cond$,
+  'the statistics reset time to propagate');
 SELECT pg_stat_clear_snapshot();
+SELECT set_config('bc_d.reset_time',
+                  (SELECT pg_stat_get_db_stat_reset_time(
+                            (SELECT oid FROM pg_database WHERE datname = current_database()))::text),
+                  false);
 \o /dev/null
 SELECT coalesce(sum(not_established),0)::int AS nes FROM bloat_cause_sample(
          min_dead_pct => 0.1, min_dead_bytes => 0,
-         sampled_at => current_setting('bc_d.t0')::timestamptz + interval '1 second') \gset
+         sampled_at => current_setting('bc_d.reset_time')::timestamptz + interval '1 second') \gset
 -- New dead rows, then the second post-reset sample, which must be ordinary. Poll for the new
 -- count instead of assuming the statistics have flushed within a fixed wait.
 \o /dev/null
@@ -372,31 +416,26 @@ SELECT coalesce((SELECT n_dead_tup FROM pg_stat_user_tables WHERE relname = 'bc_
 SELECT set_config('bc_d.late_before', :'late_before', false);
 UPDATE bc_det_persist SET v = 'late' WHERE id % 3 = 0;
 \o
-DO $wait$
-DECLARE i int;
-BEGIN
-  FOR i IN 1..300 LOOP
-    EXIT WHEN (SELECT n_dead_tup FROM pg_stat_user_tables WHERE relname = 'bc_det_persist')
-              > current_setting('bc_d.late_before')::bigint;
-    PERFORM pg_sleep(0.1);
-  END LOOP;
-END
-$wait$;
-SELECT pg_stat_clear_snapshot();
+-- Flush boundary (see support/wait.sql): the backend reports its own counts when this command ends.
+SELECT pg_sleep(1.2);
+SELECT pg_temp.wait_until(
+  $cond$SELECT n_dead_tup > current_setting('bc_d.late_before')::bigint
+          FROM pg_stat_user_tables WHERE relname = 'bc_det_persist'$cond$,
+  'the new dead rows on bc_det_persist to be visible');
 
 \o /dev/null
 SELECT coalesce(sum(sampled),0)::int AS sampled2 FROM bloat_cause_sample(
          min_dead_pct => 0.1, min_dead_bytes => 0,
-         sampled_at => current_setting('bc_d.t0')::timestamptz + interval '2 seconds') \gset
+         sampled_at => current_setting('bc_d.reset_time')::timestamptz + interval '2 seconds') \gset
 \o
 SELECT is((SELECT count(*)::int FROM bloat_cause_history
             WHERE relname = 'bc_det_persist'
-              AND sampled_at = current_setting('bc_d.t0')::timestamptz + interval '1 second'
+              AND sampled_at = current_setting('bc_d.reset_time')::timestamptz + interval '1 second'
               AND stats_reset = true), 1,
           'the first post-reset sample is the marker row');
 SELECT is((SELECT count(*)::int FROM bloat_cause_history
             WHERE relname = 'bc_det_persist'
-              AND sampled_at = current_setting('bc_d.t0')::timestamptz + interval '2 seconds'
+              AND sampled_at = current_setting('bc_d.reset_time')::timestamptz + interval '2 seconds'
               AND stats_reset = false), 1,
           'the second post-reset sample is ordinary, so the series resumed');
 SELECT ok(:nes::int >= 1, 'and the marker sample is counted as not established');

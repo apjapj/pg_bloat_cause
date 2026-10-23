@@ -8,6 +8,7 @@
 \set QUIET 1
 \o /dev/null
 SET client_min_messages = warning;
+\ir support/wait.sql
 CREATE EXTENSION IF NOT EXISTS pgtap;
 CREATE EXTENSION IF NOT EXISTS pg_bloat_cause;
 \o
@@ -48,18 +49,15 @@ ANALYZE bc_test_orders;
 UPDATE bc_test_orders SET status = 'paid' WHERE id % 2 = 0;
 \o
 -- Statistics reach the view at transaction end, flushed at most once a second on 15 and later and by
--- the collector on 14. Poll for the count instead of assuming a fixed wait is long enough; a busy or
--- slow collector is not a reason for a false failure, and a quiet one should not cost ten seconds.
-DO $wait$
-BEGIN
-  FOR i IN 1..100 LOOP
-    EXIT WHEN (SELECT n_dead_tup FROM pg_stat_user_tables
-                WHERE relname = 'bc_test_orders') > 0;
-    PERFORM pg_sleep(0.1);
-  END LOOP;
-END
-$wait$;
-SELECT pg_stat_clear_snapshot();
+-- the collector on 14. Wait for the finding the assertions below actually read, not merely for some
+-- dead count: a busy or slow collector is not a reason for a false failure, and a quiet one should
+-- not cost ten seconds.
+-- Flush boundary (see support/wait.sql): the backend reports its own counts when this command ends.
+SELECT pg_sleep(1.2);
+SELECT pg_temp.wait_until(
+  $cond$SELECT EXISTS (SELECT 1 FROM bloat_cause_findings()
+                        WHERE relname = 'bc_test_orders' AND dead_rows > 0)$cond$,
+  'bc_test_orders to appear in the findings with dead rows');
 
 SELECT is((SELECT cause FROM bloat_cause_findings(interval '1 minute') WHERE relname = 'bc_test_orders'),
           'autovacuum disabled', 'a table with autovacuum disabled and dead rows has that as its cause');
@@ -175,19 +173,15 @@ END
 $wait$;
 VACUUM bc_test_orders;
 \o
--- Poll for the cleaned count. With no other holder this exits as soon as the statistics catch up;
--- with one, it waits the same bounded ten seconds the old fixed sleep did, then the conditional
--- skip below explains why the table is still present.
-DO $wait$
-BEGIN
-  FOR i IN 1..100 LOOP
-    EXIT WHEN (SELECT n_dead_tup FROM pg_stat_user_tables
-                WHERE relname = 'bc_test_orders') = 0;
-    PERFORM pg_sleep(0.1);
-  END LOOP;
-END
-$wait$;
-SELECT pg_stat_clear_snapshot();
+-- Wait for the cleaned count. With no other holder this exits as soon as the statistics catch up;
+-- with one, it waits the bounded timeout, then the conditional skip below explains why the table is
+-- still present.
+-- Flush boundary (see support/wait.sql): the backend reports its own counts when this command ends.
+SELECT pg_sleep(1.2);
+SELECT pg_temp.wait_until(
+  $cond$SELECT n_dead_tup = 0 FROM pg_stat_user_tables
+          WHERE relname = 'bc_test_orders'$cond$,
+  'VACUUM to clean bc_test_orders');
 -- Conditional, and counted either way: if another session or a prepared transaction holds the horizon,
 -- the VACUUM above cannot remove the dead rows, the table correctly still appears, and asserting
 -- otherwise would be asserting about the cluster rather than the extension. So it is skipped, with the

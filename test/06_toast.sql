@@ -7,6 +7,7 @@
 \set QUIET 1
 \o /dev/null
 SET client_min_messages = warning;
+\ir support/wait.sql
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 CREATE EXTENSION IF NOT EXISTS pg_bloat_cause;
@@ -25,20 +26,16 @@ ANALYZE bc_toast_fix;
 ANALYZE bc_toast_none;
 \o
 
--- The TOAST statistics are written by the collector; poll rather than assuming one sleep is enough.
-DO $wait$
-DECLARE i int;
-BEGIN
-  FOR i IN 1..100 LOOP
-    EXIT WHEN (SELECT coalesce(n_live_tup, 0) + coalesce(n_dead_tup, 0)
-                 FROM pg_stat_all_tables s
-                 JOIN pg_class c ON c.reltoastrelid = s.relid
-                WHERE c.relname = 'bc_toast_fix') > 0;
-    PERFORM pg_sleep(0.1);
-  END LOOP;
-END
-$wait$;
-SELECT pg_stat_clear_snapshot();
+-- The TOAST statistics are written by the collector. The assertions need dead rows (dead_pct > 0),
+-- so wait for the dead count itself; a live-only row satisfies the old condition too early.
+-- Flush boundary (see support/wait.sql): the backend reports its own counts when this command ends.
+SELECT pg_sleep(1.2);
+SELECT pg_temp.wait_until(
+  $cond$SELECT n_dead_tup > 0
+          FROM pg_stat_all_tables s
+          JOIN pg_class c ON c.reltoastrelid = s.relid
+         WHERE c.relname = 'bc_toast_fix'$cond$,
+  'dead rows in the bc_toast_fix TOAST statistics');
 \unset QUIET
 
 SELECT plan(11);
