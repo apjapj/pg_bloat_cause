@@ -39,7 +39,7 @@ step "README catalog claims"
 step "the stated PostgreSQL range"
 ./scripts/check-pg-matrix-claims.sh
 # The two CI copies define the same jobs and run the same command for the ones they share. Vendored
-# from pg-dev-infra; run with bash, it has no shebang.
+# from internal-tooling; run with bash, it has no shebang.
 step "the two CI copies agree"
 bash ./scripts/check-ci-parity.sh
 # The PGXN metadata is generated from the control file and the stable fields, and it must not name a
@@ -50,7 +50,7 @@ step "the PGXN metadata"
 ./scripts/pgxn-meta.py --check >/dev/null
 
 # Every vendored harness copy still matches the sha256 in its own header. The canonical is private,
-# so this is the in-repo half of the sync. Vendored from pg-dev-infra; run with bash.
+# so this is the in-repo half of the sync. Vendored from internal-tooling; run with bash.
 step "the vendored harness matches its headers"
 bash ./scripts/check-vendored-hashes.sh
 # A scenario that reads a cumulative statistic must settle the statistics first, or the read races the

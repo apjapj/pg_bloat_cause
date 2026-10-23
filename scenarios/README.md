@@ -35,7 +35,7 @@ and s7 also reads its log.
 which is how the runs below were made:
 
 ```bash
-docker run -d --rm --name bc-scen-14 -p 127.0.0.1:5614:5432 -e POSTGRES_PASSWORD=test pg-dev-infra-pg14 \
+docker run -d --rm --name bc-scen-14 -p 127.0.0.1:5614:5432 -e POSTGRES_PASSWORD=test internal-tooling-pg14 \
   postgres -c wal_level=logical -c max_prepared_transactions=10 \
            -c log_autovacuum_min_duration=0 -c autovacuum_naptime=10s
 ```
@@ -62,7 +62,7 @@ when the server stops, so the container goes with it and the change never takes 
 | `s16_holder_after_vacuum` | a table with a prior vacuum, new dead rows, then a holder opened after them | the holder is **not** primary: the earlier vacuum cannot establish that it binds, so the holder is in unknowns and the next cause down is primary. Part 2: VACUUM removes all [100,000](evidence/s16_holder_after_vacuum.pg18.txt), proving it did not bind | 14, 18 |
 
 Every run above was on PostgreSQL 14.24 and 18.6, on a primary/standby pair per version built by
-`standby.sh` from the pg_lock_tree matrix images (`pg-dev-infra-pg14`, `pg-dev-infra-pg18`). The
+`standby.sh` from the pg_lock_tree matrix images (`internal-tooling-pg14`, `internal-tooling-pg18`). The
 primary runs with `wal_level = logical`, `max_prepared_transactions = 10`, `log_autovacuum_min_duration
 = 0` and **`autovacuum_naptime = 10s`**; the standby with `hot_standby_feedback = on`. The short naptime makes the waits in s5 to s7 forty seconds instead of four minutes; nothing
 else depends on it. The two versions agreed on every count above.
