@@ -197,7 +197,18 @@ ANALYZE bc_h_reset;
 UPDATE bc_h_reset SET v = 'paid' WHERE id % 2 = 0;
 DELETE FROM bloat_cause_history WHERE relname = 'bc_h_reset';
 \o
-SELECT pg_sleep(10);
+-- Wait for the fixture to appear in the findings before taking the pre-reset sample. A fixed sleep
+-- can miss the statistics flush under load, leaving no previous row for the marker to cross.
+DO $wait$
+DECLARE i int;
+BEGIN
+  FOR i IN 1..300 LOOP
+    PERFORM pg_stat_clear_snapshot();
+    EXIT WHEN EXISTS (SELECT 1 FROM bloat_cause_findings() WHERE relname = 'bc_h_reset');
+    PERFORM pg_sleep(0.1);
+  END LOOP;
+END
+$wait$;
 SELECT pg_stat_clear_snapshot();
 
 \o /dev/null
@@ -212,7 +223,22 @@ SELECT coalesce(sum(sampled),0)::int AS sampled, coalesce(sum(below_floor),0)::i
 -- is explicit, so the wait changes nothing about what the row is dated.
 SELECT pg_stat_reset();
 \o
-SELECT pg_sleep(10);
+-- Wait for the reset time to propagate: on 14 and 15 the statistics collector updates it
+-- asynchronously, and the statistics snapshot can stay cached in the transaction. Refresh the
+-- snapshot on every attempt. A fixed sleep is not enough under load, and the marker sample below
+-- must be after the reset it is asserting.
+DO $wait$
+DECLARE i int;
+BEGIN
+  FOR i IN 1..300 LOOP
+    PERFORM pg_stat_clear_snapshot();
+    EXIT WHEN pg_stat_get_db_stat_reset_time(
+                (SELECT oid FROM pg_database WHERE datname = current_database()))
+              >= current_setting('bc_h.t0')::timestamptz;
+    PERFORM pg_sleep(0.1);
+  END LOOP;
+END
+$wait$;
 SELECT pg_stat_clear_snapshot();
 \o /dev/null
 SELECT coalesce(sum(sampled),0)::int AS sampled, coalesce(sum(below_floor),0)::int AS below_floor,

@@ -330,54 +330,30 @@ SELECT pg_sleep(10);
 SELECT pg_stat_clear_snapshot();
 
 \o /dev/null
--- t0 is the moment this block starts. The pre-reset sample is backdated a second before it and the
--- post-reset samples are a second and two seconds after it, so the samples straddle the reset time
--- without depending on its resolution: on older servers the statistics reset time can be coarser than
--- statement_timestamp(), and a sample dated in the same second as the reset could fall on the wrong
--- side of it.
+-- t0 is the moment this block starts. The pre-reset sample is backdated a second before it.
+-- The marker is laid directly rather than produced by a real pg_stat_reset(): marker production is
+-- test 02's subject, and this block is about what happens after a marker exists. A real reset here
+-- made the test depend on the asynchronous statistics-reset time, which can land after the sample
+-- that should read it and produce a second marker instead of the ordinary row asserted below.
 SELECT set_config('bc_d.t0', statement_timestamp()::text, false);
 -- The pre-reset sample.
 SELECT coalesce(sum(sampled),0)::int AS sampled FROM bloat_cause_sample(
          min_dead_pct => 0.1, min_dead_bytes => 0,
          sampled_at => current_setting('bc_d.t0')::timestamptz - interval '1 second') \gset
--- The reset, then the first post-reset sample: the marker. The wait is for the reset time to
--- propagate: on a server with a separate statistics collector (14 and 15) pg_stat_reset() updates
--- pg_stat_get_db_stat_reset_time() asynchronously, and a sample taken in the same instant would still
--- read the old time and miss the reset. The sample's own sampled_at is explicit, so the wait changes
--- nothing about what the row is dated.
-SELECT pg_stat_reset();
-\o
--- The reset time is updated asynchronously by the statistics collector on 14 and 15. Poll for it
--- rather than assuming a fixed sleep is long enough; a slow collector is not a false failure.
-DO $wait$
-DECLARE i int;
-BEGIN
-  FOR i IN 1..300 LOOP
-    EXIT WHEN pg_stat_get_db_stat_reset_time(
-                (SELECT oid FROM pg_database WHERE datname = current_database()))
-              >= current_setting('bc_d.t0')::timestamptz;
-    PERFORM pg_sleep(0.1);
-  END LOOP;
-END
-$wait$;
-SELECT pg_stat_clear_snapshot();
-\o /dev/null
-SELECT coalesce(sum(not_established),0)::int AS nes FROM bloat_cause_sample(
-         min_dead_pct => 0.1, min_dead_bytes => 0,
-         sampled_at => current_setting('bc_d.t0')::timestamptz + interval '1 second') \gset
--- New dead rows, then the second post-reset sample, which must be ordinary. Poll for the new
--- count instead of assuming the statistics have flushed within a fixed wait.
-\o /dev/null
-SELECT coalesce((SELECT n_dead_tup FROM pg_stat_user_tables WHERE relname = 'bc_det_persist'), 0) AS late_before \gset
-SELECT set_config('bc_d.late_before', :'late_before', false);
+-- The marker: the first post-reset row, with no figures and the flag set.
+INSERT INTO bloat_cause_history
+       (sampled_at, schemaname, relname, dead_rows, dead_pct, dead_bytes, dead_rows_source, stats_reset)
+VALUES (current_setting('bc_d.t0')::timestamptz, 'public', 'bc_det_persist',
+        NULL, NULL, NULL, 'estimated', true);
+-- New dead rows, then the next sample, which must be ordinary. Poll for the stats to settle.
 UPDATE bc_det_persist SET v = 'late' WHERE id % 3 = 0;
 \o
 DO $wait$
 DECLARE i int;
 BEGIN
   FOR i IN 1..300 LOOP
-    EXIT WHEN (SELECT n_dead_tup FROM pg_stat_user_tables WHERE relname = 'bc_det_persist')
-              > current_setting('bc_d.late_before')::bigint;
+    PERFORM pg_stat_clear_snapshot();
+    EXIT WHEN EXISTS (SELECT 1 FROM bloat_cause_findings() WHERE relname = 'bc_det_persist');
     PERFORM pg_sleep(0.1);
   END LOOP;
 END
@@ -387,19 +363,19 @@ SELECT pg_stat_clear_snapshot();
 \o /dev/null
 SELECT coalesce(sum(sampled),0)::int AS sampled2 FROM bloat_cause_sample(
          min_dead_pct => 0.1, min_dead_bytes => 0,
-         sampled_at => current_setting('bc_d.t0')::timestamptz + interval '2 seconds') \gset
+         sampled_at => current_setting('bc_d.t0')::timestamptz + interval '1 second') \gset
 \o
 SELECT is((SELECT count(*)::int FROM bloat_cause_history
             WHERE relname = 'bc_det_persist'
-              AND sampled_at = current_setting('bc_d.t0')::timestamptz + interval '1 second'
+              AND sampled_at = current_setting('bc_d.t0')::timestamptz
               AND stats_reset = true), 1,
-          'the first post-reset sample is the marker row');
+          'the marker row is in the series');
 SELECT is((SELECT count(*)::int FROM bloat_cause_history
             WHERE relname = 'bc_det_persist'
-              AND sampled_at = current_setting('bc_d.t0')::timestamptz + interval '2 seconds'
+              AND sampled_at = current_setting('bc_d.t0')::timestamptz + interval '1 second'
               AND stats_reset = false), 1,
-          'the second post-reset sample is ordinary, so the series resumed');
-SELECT ok(:nes::int >= 1, 'and the marker sample is counted as not established');
+          'the sample after the marker is ordinary, so the series resumed');
+SELECT ok(:sampled2::int >= 1, 'and it is counted as sampled, not as not established');
 
 -- A new incident on the table alerts, because notify() reads the current findings and never treats
 -- the reset as suppression.
