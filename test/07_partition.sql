@@ -8,6 +8,7 @@
 \set QUIET 1
 \o /dev/null
 SET client_min_messages = warning;
+\ir support/wait.sql
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 CREATE EXTENSION IF NOT EXISTS pg_bloat_cause;
@@ -24,17 +25,13 @@ DELETE FROM bc_part WHERE id % 5 = 0;
 ANALYZE bc_part;
 \o
 
-DO $wait$
-DECLARE i int;
-BEGIN
-  FOR i IN 1..100 LOOP
-    EXIT WHEN (SELECT sum(n_dead_tup) FROM pg_stat_user_tables
-                WHERE relname IN ('bc_part_1', 'bc_part_2')) > 0;
-    PERFORM pg_sleep(0.1);
-  END LOOP;
-END
-$wait$;
-SELECT pg_stat_clear_snapshot();
+-- One visible leaf satisfies the old sum. The test asserts both leaves, so wait for both.
+-- Flush boundary (see support/wait.sql): the backend reports its own counts when this command ends.
+SELECT pg_sleep(1.2);
+SELECT pg_temp.wait_until(
+  $cond$SELECT count(*) = 2 FROM bloat_cause_findings()
+          WHERE relname IN ('bc_part_1', 'bc_part_2')$cond$,
+  'both partition leaves to appear in the findings');
 \unset QUIET
 
 SELECT plan(6);

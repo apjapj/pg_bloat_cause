@@ -7,6 +7,7 @@
 \set QUIET 1
 \o /dev/null
 SET client_min_messages = warning;
+\ir support/wait.sql
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 CREATE EXTENSION IF NOT EXISTS pg_bloat_cause;
@@ -24,8 +25,14 @@ CREATE TABLE bc_ctx_orders (id int PRIMARY KEY, status text)
 INSERT INTO bc_ctx_orders SELECT g, 'new' FROM generate_series(1, 100) g;
 VACUUM (ANALYZE) bc_ctx_orders;
 \o
-SELECT pg_sleep(1);
-SELECT pg_stat_clear_snapshot();
+-- The assertions below read the live count and the recorded vacuum from the context reader, not
+-- from a one-second-old snapshot.
+-- Flush boundary (see support/wait.sql): the backend reports its own counts when this command ends.
+SELECT pg_sleep(1.2);
+SELECT pg_temp.wait_until(
+  $cond$SELECT n_live_tup > 0 AND last_vacuum IS NOT NULL
+          FROM bloat_cause_context('public', 'bc_ctx_orders')$cond$,
+  'the VACUUM of bc_ctx_orders to be visible');
 
 SELECT plan(13);
 
